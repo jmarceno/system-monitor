@@ -11,9 +11,9 @@ Item {
     property string label: ""
     property string sub: ""
 
-    width: ringSize + textCol.implicitWidth + 10
-    height: ringSize
-    readonly property int ringSize: 44
+    implicitWidth: ringSize + 54
+    implicitHeight: ringSize
+    property int ringSize: 36
 
     Canvas {
         id: ring
@@ -53,7 +53,8 @@ Item {
     Column {
         id: textCol
         anchors.left: ring.right
-        anchors.leftMargin: 10
+        anchors.leftMargin: 6
+        anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
         spacing: 0
 
@@ -61,17 +62,23 @@ Item {
             text: root.label
             color: Theme.textMuted
             font.pixelSize: Theme.fontSizeSm
+            width: parent.width
+            elide: Text.ElideRight
         }
         Text {
             text: isFinite(root.value) ? Math.round(root.value) + "%" : "n/a"
             color: Theme.text
             font.pixelSize: Theme.fontSizeLg
             font.bold: true
+            width: parent.width
+            elide: Text.ElideRight
         }
         Text {
             text: root.sub
             color: Theme.textFaint
             font.pixelSize: Theme.fontSizeSm
+            width: parent.width
+            elide: Text.ElideRight
         }
     }
 }

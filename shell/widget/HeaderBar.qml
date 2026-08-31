@@ -96,24 +96,49 @@ Rectangle {
         property real pressY: 0
         property int startX: 0
         property int startY: 0
+        property int pendingX: 0
+        property int pendingY: 0
+
+        function applyPendingPosition() {
+            if (!persist)
+                return;
+            persist.posX = pendingX;
+            persist.posY = pendingY;
+        }
+
+        // Layer-shell margin changes require a compositor reconfigure. Pointer
+        // events can arrive much faster than frames, so coalesce them instead
+        // of forcing a full surface redraw for every few pixels travelled.
+        Timer {
+            id: dragFrame
+            interval: 16
+            repeat: false
+            onTriggered: parent.applyPendingPosition()
+        }
 
         onPressed: mouse => {
             pressX = mouse.x;
             pressY = mouse.y;
             startX = win ? win.margins.left : 0;
             startY = win ? win.margins.top : 0;
+            pendingX = startX;
+            pendingY = startY;
         }
         onPositionChanged: mouse => {
             if (!pressed || !win || !win.screen)
                 return;
             const nx = Math.round(Format.clamp(startX + mouse.x - pressX, 0, Math.max(0, win.screen.width - win.width)));
             const ny = Math.round(Format.clamp(startY + mouse.y - pressY, 0, Math.max(0, win.screen.height - win.height)));
-            if (persist) {
-                persist.posX = nx;
-                persist.posY = ny;
-            }
+            pendingX = nx;
+            pendingY = ny;
+            if (!dragFrame.running)
+                dragFrame.start();
         }
-        onReleased: mouse => root.dragFinished(mouse.x, mouse.y)
+        onReleased: mouse => {
+            dragFrame.stop();
+            applyPendingPosition();
+            root.dragFinished(mouse.x, mouse.y);
+        }
     }
 
     component HeaderButton: Rectangle {

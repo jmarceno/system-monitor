@@ -15,80 +15,81 @@ Rectangle {
 
     Row {
         id: strip
-        anchors.centerIn: parent
-        spacing: 14
+        anchors.fill: parent
+        anchors.margins: 8
+        spacing: 4
+
+        readonly property real cellWidth: (width - spacing * 4) / 5
 
         RingGauge {
+            width: strip.cellWidth
             label: "CPU"
             value: Cpu.busyPct
             ringColor: Theme.accentCyan
             sub: Format.fmtMHz(Cpu.mhz)
         }
 
-        VDivider {}
-
         RingGauge {
+            width: strip.cellWidth
             label: "RAM"
             value: MemInfo.usedPct
             ringColor: Theme.accentBlue
             sub: MemInfo.ready ? Format.fmtKB(MemInfo.usedKB) + " / " + Format.fmtKB(MemInfo.totalKB) : "…"
         }
 
-        VDivider {}
-
         RingGauge {
+            width: strip.cellWidth
             label: "Swap"
             value: SwapDisk.usedPct
             ringColor: SwapDisk.verdict === 3 ? Theme.accentRed : Theme.accentCyan
             sub: SwapDisk.totalSizeKB > 0 ? Format.fmtKB(SwapDisk.totalUsedKB) + " / " + Format.fmtKB(SwapDisk.totalSizeKB) : "…"
         }
 
-        VDivider {}
-
         RingGauge {
+            width: strip.cellWidth
             label: "GPU VRAM"
             value: Vram.usedPct
             ringColor: Theme.accentAmber
             sub: Vram.available ? Format.fmtKB(Vram.gpuUsedMiB * 1024) + " / " + Format.fmtKB(Vram.gpuTotalMiB * 1024) : "n/a"
         }
 
-        VDivider {}
-
         // Disk I/O block (mockup): sparkline + R/W rates.
         Column {
+            id: ioBlock
+            width: strip.cellWidth
             anchors.verticalCenter: parent.verticalCenter
             spacing: 2
 
             Row {
+                width: parent.width
                 spacing: 6
                 Text {
+                    id: ioLabel
                     text: "I/O"
                     color: Theme.textMuted
                     font.pixelSize: Theme.fontSizeSm
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Sparkline {
+                    width: Math.max(24, ioBlock.width - ioLabel.implicitWidth - 6)
                     history: DiskIo.history
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
             Text {
+                width: parent.width
                 text: "R  " + Format.fmtRateKBps(DiskIo.readKBps)
                 color: Theme.text
                 font.pixelSize: Theme.fontSizeSm
+                elide: Text.ElideRight
             }
             Text {
+                width: parent.width
                 text: "W  " + Format.fmtRateKBps(DiskIo.writeKBps)
                 color: Theme.text
                 font.pixelSize: Theme.fontSizeSm
+                elide: Text.ElideRight
             }
         }
-    }
-
-    component VDivider: Rectangle {
-        width: 1
-        height: 36
-        color: Theme.cardBorder
-        anchors.verticalCenter: parent.verticalCenter
     }
 }

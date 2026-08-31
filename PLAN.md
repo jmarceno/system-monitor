@@ -286,8 +286,13 @@ The mockup added three things that were "out of scope" in §2. They are implemen
   with formal parameters.
 - Never mutate persisted window state from a pointer **release** handler: the write-back can
   race the drag that just finished (observed as "the widget only drags once"). Same-screen
-  drops leave the drag's position untouched; only cross-screen hand-offs rewrite state, and
-  window recreation is deferred via `Qt.callLater` so the old surface is fully released.
+  drops leave the drag's position untouched; only cross-screen hand-offs rewrite state.
+- Do not destroy and recreate a `PanelWindow` during a cross-screen hand-off. On this Qt/KWin
+  stack that can invalidate the shared scenegraph context and leave the replacement unable to
+  drag. Cache one surface per visited output and switch their visibility after pointer release.
+- Coalesce raw pointer motion to at most one layer-shell margin update per frame. Every margin
+  change requires a compositor reconfigure; applying every mouse event makes dragging visibly
+  redraw in small, laggy steps.
 
 ### 9.4 Verification performed (2026-08-31)
 

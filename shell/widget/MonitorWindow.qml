@@ -18,8 +18,10 @@ import "../service"
 //     pin button raising it above via `aboveWindows`.
 //
 // Layer-shell surfaces are bound to an output at creation (a runtime
-// `screen` reassignment is ignored), so moving between monitors is done by
-// RECREATING the window on the target screen at drop (_handleDrop).
+// `screen` reassignment is ignored). Keep one surface per visited output and
+// switch visibility at drop. Destroying the old surface during a hand-off can
+// invalidate Qt's shared scenegraph context, leaving the replacement visible
+// but unable to receive another drag.
 // Safety contract: ordinary user process alongside plasmashell; the close
 // button quits the instance (systemd kill switch equivalent).
 Item {
@@ -30,7 +32,7 @@ Item {
     // restarts — we keep our own JSON file in the Quickshell state dir
     // (debounced writes; see PLAN.md §9.3).
     QtObject {
-        id: persist
+        id: windowState
 
         property int posX: 24
         property int posY: 24
@@ -45,6 +47,7 @@ Item {
     }
 
     property var winHandle: null
+    property var _windowsByScreen: ({})
     property bool _stateLoaded: false
 
     // ---- state file ---------------------------------------------------------
@@ -58,15 +61,15 @@ Item {
             try {
                 const s = JSON.parse(text());
                 if (Number.isFinite(s.posX))
-                    persist.posX = s.posX;
+                    windowState.posX = s.posX;
                 if (Number.isFinite(s.posY))
-                    persist.posY = s.posY;
+                    windowState.posY = s.posY;
                 if (typeof s.pinned === "boolean")
-                    persist.pinned = s.pinned;
+                    windowState.pinned = s.pinned;
                 if (typeof s.collapsed === "boolean")
-                    persist.collapsed = s.collapsed;
+                    windowState.collapsed = s.collapsed;
                 if (typeof s.screenName === "string")
-                    persist.screenName = s.screenName;
+                    windowState.screenName = s.screenName;
             } catch (e) {
                 console.warn("system-monitor: corrupt window-state.json, using defaults:", e);
             }
@@ -92,18 +95,18 @@ Item {
         // setText() writes the file (atomic by default); writeAdapter() is
         // only for adapter-backed views (e.g. JsonAdapter).
         stateFile.setText(JSON.stringify({
-            posX: persist.posX,
-            posY: persist.posY,
-            pinned: persist.pinned,
-            collapsed: persist.collapsed,
-            screenName: ctrl.winHandle && ctrl.winHandle.screen ? ctrl.winHandle.screen.name : persist.screenName
+            posX: windowState.posX,
+            posY: windowState.posY,
+            pinned: windowState.pinned,
+            collapsed: windowState.collapsed,
+            screenName: ctrl.winHandle && ctrl.winHandle.screen ? ctrl.winHandle.screen.name : windowState.screenName
         }));
     }
 
     function _resolveScreen() {
-        if (persist.screenName) {
+        if (windowState.screenName) {
             for (let i = 0; i < Quickshell.screens.length; i++) {
-                if (Quickshell.screens[i].name === persist.screenName)
+                if (Quickshell.screens[i].name === windowState.screenName)
                     return Quickshell.screens[i];
             }
         }
@@ -123,7 +126,7 @@ Item {
 
     Component.onCompleted: {
         SystemSnapshot.compactMode = Qt.binding(function () {
-            return persist.collapsed;
+            return windowState.collapsed;
         });
         // The window is spawned once the state file has been read (or failed);
         // if screens are not announced yet, onScreensChanged retries.
@@ -147,24 +150,45 @@ Item {
         if (!target)
             return; // no screens yet; screensChanged will retry
 
-        const old = ctrl.winHandle;
-        ctrl.winHandle = winComponent.createObject(ctrl, {
-            screen: target
+        _activateScreen(target);
+    }
+
+    function _windowForScreen(target) {
+        let window = ctrl._windowsByScreen[target.name];
+        if (window)
+            return window;
+
+        window = winComponent.createObject(ctrl, {
+            screen: target,
+            visible: false
         });
-        if (ctrl.winHandle && old)
-            old.destroy();
+        if (window)
+            ctrl._windowsByScreen[target.name] = window;
+        return window;
+    }
+
+    function _activateScreen(target) {
+        const next = _windowForScreen(target);
+        if (!next)
+            return;
+
+        const old = ctrl.winHandle;
+        ctrl.winHandle = next;
+        next.visible = true;
+        if (old && old !== next)
+            old.visible = false;
     }
 
     function _clampToScreen() {
         const w = ctrl.winHandle;
         if (!w || !w.screen)
             return;
-        persist.posX = Math.round(Format.clamp(persist.posX, 0, Math.max(0, w.screen.width - w.width)));
-        persist.posY = Math.round(Format.clamp(persist.posY, 0, Math.max(0, w.screen.height - w.height)));
+        windowState.posX = Math.round(Format.clamp(windowState.posX, 0, Math.max(0, w.screen.width - w.width)));
+        windowState.posY = Math.round(Format.clamp(windowState.posY, 0, Math.max(0, w.screen.height - w.height)));
     }
 
     // Drag may end over a different monitor: hand the widget off by
-    // recreating it on the target screen, position under the cursor.
+    // activating its already-created (or cached) target-screen surface.
     // NOTE: never mutate persisted state on a same-screen drop — the release
     // handler must not fight the drag that just finished.
     function _handleDrop(win, mouseX, mouseY) {
@@ -182,13 +206,13 @@ Item {
         if (!target || target === win.screen)
             return; // same screen: drag position is already authoritative
 
-        persist.posX = Math.round(Format.clamp(cursorGlobalX - grabX - target.x, 0, Math.max(0, target.width - win.width)));
-        persist.posY = Math.round(Format.clamp(cursorGlobalY - grabY - target.y, 0, Math.max(0, target.height - win.height)));
-        persist.screenName = target.name;
+        windowState.posX = Math.round(Format.clamp(cursorGlobalX - grabX - target.x, 0, Math.max(0, target.width - win.width)));
+        windowState.posY = Math.round(Format.clamp(cursorGlobalY - grabY - target.y, 0, Math.max(0, target.height - win.height)));
+        windowState.screenName = target.name;
         _saveState();
-        // Defer so the old window (and its pointer grab) is fully released
-        // before the replacement is created.
-        Qt.callLater(_spawnWindow);
+        // Defer the visibility switch until the releasing MouseArea has given
+        // up its pointer grab. The old surface remains cached, not destroyed.
+        Qt.callLater(function () { ctrl._activateScreen(target); });
     }
 
     // ---- the window ---------------------------------------------------------
@@ -207,23 +231,23 @@ Item {
             }
             exclusionMode: ExclusionMode.Ignore
             focusable: false
-            aboveWindows: persist.pinned
+            aboveWindows: windowState.pinned
             color: "transparent"
 
-            implicitWidth: persist.collapsed ? Config.collapsedWidth : Config.windowWidth
-            implicitHeight: persist.collapsed
+            implicitWidth: windowState.collapsed ? Config.collapsedWidth : Config.windowWidth
+            implicitHeight: windowState.collapsed
                 ? collapsedPill.implicitHeight + 12
                 : contentCol.implicitHeight + 16
 
-            margins.left: persist.posX
-            margins.top: persist.posY
+            margins.left: windowState.posX
+            margins.top: windowState.posY
 
             onWidthChanged: ctrl._clampToScreen()
 
             // Full view
             Rectangle {
                 id: fullCard
-                visible: !persist.collapsed
+                visible: !windowState.collapsed
                 anchors.fill: parent
                 radius: 14
                 color: Theme.windowBg
@@ -239,9 +263,12 @@ Item {
                     HeaderBar {
                         width: parent.width
                         win: win
-                        persist: persist
-                        onCollapseToggled: persist.collapsed = true
-                        onPinToggled: persist.pinned = !persist.pinned
+                        // Use an unambiguous outer id. `persist: persist`
+                        // resolves to HeaderBar.persist inside a dynamically
+                        // created Component and leaves it undefined.
+                        persist: windowState
+                        onCollapseToggled: windowState.collapsed = true
+                        onPinToggled: windowState.pinned = !windowState.pinned
                         onCloseRequested: Qt.quit()
                         onDragFinished: (mouseX, mouseY) => ctrl._handleDrop(win, mouseX, mouseY)
                     }
@@ -257,7 +284,7 @@ Item {
             // Collapsed pill
             Rectangle {
                 id: collapsedPill
-                visible: persist.collapsed
+                visible: windowState.collapsed
                 anchors.fill: parent
                 radius: 16
                 color: Theme.windowBg
@@ -308,7 +335,7 @@ Item {
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: persist.collapsed = false
+                    onClicked: windowState.collapsed = false
                 }
             }
         }
