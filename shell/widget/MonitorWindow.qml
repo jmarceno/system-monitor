@@ -73,6 +73,7 @@ PanelWindow {
                 onCollapseToggled: persist.collapsed = true
                 onPinToggled: persist.pinned = !persist.pinned
                 onCloseRequested: Qt.quit()
+                onDragFinished: (mx, my) => win._handleDrop(mx, my)
             }
 
             TopStrip { width: parent.width }
@@ -80,7 +81,6 @@ PanelWindow {
             SwapAttributionCard { width: parent.width }
             ZramCard { width: parent.width }
             VramCard { width: parent.width }
-            FooterChips { width: parent.width }
         }
     }
 
@@ -148,6 +148,40 @@ PanelWindow {
     }
 
     onWidthChanged: _clampToScreen()
+
+    // Drag may end over a different monitor. Layer-shell surfaces are bound
+    // to one output, so on drop we check which screen the cursor is over and
+    // hand the widget off: reassign `screen`, then rebase the margins on the
+    // new screen's top-left so the widget lands under the cursor.
+    function _handleDrop(mouseX, mouseY) {
+        if (!win.screen || Quickshell.screens.length < 2)
+            return;
+
+        // Window-content offset: HeaderBar sits inside contentCol (margins 8).
+        const contentOffset = 8;
+        const cursorGlobalX = win.screen.x + win.margins.left + contentOffset + mouseX;
+        const cursorGlobalY = win.screen.y + win.margins.top + contentOffset + mouseY;
+        // grab offset = cursor position relative to the window's top-left
+        const grabX = contentOffset + mouseX;
+        const grabY = contentOffset + mouseY;
+
+        const target = _screenAt(cursorGlobalX, cursorGlobalY);
+        if (!target || target === win.screen)
+            return;
+
+        win.screen = target;
+        persist.posX = Math.round(Format.clamp(cursorGlobalX - grabX - target.x, 0, Math.max(0, target.width - win.width)));
+        persist.posY = Math.round(Format.clamp(cursorGlobalY - grabY - target.y, 0, Math.max(0, target.height - win.height)));
+    }
+
+    function _screenAt(globalX, globalY) {
+        for (let i = 0; i < Quickshell.screens.length; i++) {
+            const s = Quickshell.screens[i];
+            if (globalX >= s.x && globalX < s.x + s.width && globalY >= s.y && globalY < s.y + s.height)
+                return s;
+        }
+        return null;
+    }
 
     function _clampToScreen() {
         if (!win.screen)

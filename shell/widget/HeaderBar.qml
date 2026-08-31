@@ -15,6 +15,7 @@ Rectangle {
     signal collapseToggled()
     signal pinToggled()
     signal closeRequested()
+    signal dragFinished(real mouseX, real mouseY)
 
     implicitHeight: 56
     radius: 12
@@ -112,6 +113,7 @@ Rectangle {
                 persist.posY = ny;
             }
         }
+        onReleased: mouse => root.dragFinished(mouse.x, mouse.y)
     }
 
     component HeaderButton: Rectangle {
