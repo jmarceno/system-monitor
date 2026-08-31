@@ -1,0 +1,208 @@
+// Pure parsing helpers for /proc, /sys and nvidia-smi output.
+// Keep these functions side-effect free so they can be tested standalone
+// (scripts/parse-test.mjs exercises the same logic in node).
+.pragma library
+
+// ---- generic helpers -------------------------------------------------------
+
+function toNum(v) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+}
+
+function clamp(v, lo, hi) {
+    return Math.max(lo, Math.min(hi, v));
+}
+
+// "MemTotal:       32786132 kB" lines -> { MemTotal: 32786132, ... }
+function keyValueMap(text) {
+    const out = {};
+    if (!text)
+        return out;
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+        const idx = lines[i].indexOf(":");
+        if (idx < 0)
+            continue;
+        const key = lines[i].slice(0, idx).trim();
+        const val = lines[i].slice(idx + 1).trim().split(/\s+/)[0];
+        out[key] = toNum(val);
+    }
+    return out;
+}
+
+// "key value" whitespace pairs (e.g. /proc/vmstat) -> { pswpin: 123, ... }
+function pairMap(text) {
+    const out = {};
+    if (!text)
+        return out;
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+        const parts = lines[i].trim().split(/\s+/);
+        if (parts.length >= 2)
+            out[parts[0]] = toNum(parts[1]);
+    }
+    return out;
+}
+
+// ---- /proc/swaps -----------------------------------------------------------
+
+// Header line skipped. Returns [{name, type, sizeKB, usedKB, priority}]
+function parseSwaps(text) {
+    const out = [];
+    if (!text)
+        return out;
+    const lines = text.split("\n");
+    for (let i = 1; i < lines.length; i++) {
+        const parts = lines[i].trim().split(/\s+/);
+        if (parts.length < 5)
+            continue;
+        out.push({
+            name: parts[0],
+            type: parts[1],
+            sizeKB: toNum(parts[2]),
+            usedKB: toNum(parts[3]),
+            priority: toNum(parts[4]),
+            isZram: parts[0].indexOf("/dev/zram") === 0
+        });
+    }
+    return out;
+}
+
+// ---- zram ------------------------------------------------------------------
+
+// /sys/block/zramN/mm_stat -> array of numbers. Field count varies by kernel
+// (6..9); callers index defensively. Units: bytes.
+// [orig_data_size, compr_data_size, mem_used_total, mem_limit, mem_used_max,
+//  same_pages, huge_pages, huge_pages_failed, huge_pages_alloc]
+function parseMmStat(text) {
+    if (!text)
+        return [];
+    return text.trim().split(/\s+/).map(toNum);
+}
+
+// /sys/block/zramN/stat (diskstat layout):
+// [reads completed, reads merged, sectors read, writes completed,
+//  writes merged, sectors written, in_flight, io_ticks, ...]
+function parseDiskstat(text) {
+    if (!text)
+        return [];
+    return text.trim().split(/\s+/).map(toNum);
+}
+
+// ---- /proc/diskstats -------------------------------------------------------
+
+// Whole physical disks only (partitions, zram, loop, dm, md excluded) to
+// avoid double counting. Returns [{name, readSectors, writeSectors}]
+function parseDiskstats(text) {
+    const out = [];
+    if (!text)
+        return out;
+    const lines = text.split("\n");
+    const wholeDisk = /^(nvme\d+n\d+|sd[a-z]+|vd[a-z]+|hd[a-z]+|mmcblk\d+|sr\d+)$/;
+    for (let i = 0; i < lines.length; i++) {
+        const parts = lines[i].trim().split(/\s+/);
+        if (parts.length < 10)
+            continue;
+        const name = parts[2];
+        if (!wholeDisk.test(name))
+            continue;
+        // fields: reads completed, reads merged, sectors read, ... , sectors written (index 9)
+        out.push({
+            name: name,
+            readSectors: toNum(parts[5]),
+            writeSectors: toNum(parts[9])
+        });
+    }
+    return out;
+}
+
+// ---- /proc/stat ------------------------------------------------------------
+
+// First "cpu " line -> array of jiffies [user, nice, system, idle, iowait, ...]
+function parseCpu(text) {
+    if (!text)
+        return [];
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].indexOf("cpu ") === 0) {
+            const parts = lines[i].trim().split(/\s+/).slice(1);
+            return parts.map(toNum);
+        }
+    }
+    return [];
+}
+
+// Average of per-core "cpu MHz" from /proc/cpuinfo.
+function parseCpuMHz(text) {
+    if (!text)
+        return 0;
+    const lines = text.split("\n");
+    let sum = 0;
+    let count = 0;
+    for (let i = 0; i < lines.length; i++) {
+        const m = lines[i].match(/cpu MHz\s*:\s*([0-9.]+)/);
+        if (!m)
+            continue;
+        const v = toNum(m[1]);
+        if (v > 0) {
+            sum += v;
+            count++;
+        }
+    }
+    return count > 0 ? sum / count : 0;
+}
+
+// ---- /proc/pressure --------------------------------------------------------
+
+// "some avg10=13.59 ..." -> 13.59 (percent)
+function parsePressureSome(text) {
+    if (!text)
+        return -1;
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].indexOf("some ") === 0) {
+            const m = lines[i].match(/avg10=([0-9.]+)/);
+            return m ? toNum(m[1]) : -1;
+        }
+    }
+    return -1;
+}
+
+// ---- nvidia-smi ------------------------------------------------------------
+
+// "11213, 12288" -> [usedMiB, totalMiB]
+function parseNvidiaGpu(text) {
+    if (!text)
+        return [0, 0];
+    const parts = text.trim().split(",");
+    return [toNum(parts[0]), toNum(parts[1])];
+}
+
+// CSV lines "pid, used_memory, /full/path process args" ->
+// [{pid, mib, name, rawName}]
+function parseNvidiaApps(text) {
+    const out = [];
+    if (!text)
+        return out;
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line)
+            continue;
+        const parts = line.split(",");
+        if (parts.length < 3)
+            continue;
+        const pid = toNum(parts[0]);
+        const mib = toNum(parts[1]);
+        if (pid <= 0 || mib <= 0)
+            continue;
+        // process_name may contain commas? nvidia-smi quotes never; take rest
+        // of the line, strip args, basename.
+        let rawName = parts.slice(2).join(",").trim();
+        const exe = rawName.split(/\s+/)[0];
+        const base = exe.split("/").pop();
+        out.push({ pid: pid, mib: mib, name: base || rawName, rawName: rawName });
+    }
+    return out;
+}

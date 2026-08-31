@@ -1,5 +1,8 @@
 # Implementation Plan — `system-monitor` (Quickshell widget for KDE Plasma)
 
+> **Status: implemented (M0–M4).** The widget matches `mock/mockup.png` and runs as a
+> systemd user service. Deviations from this plan are documented in §9.
+
 Target environment (verified on this machine):
 
 | Fact | Value |
@@ -238,3 +241,55 @@ Vertical compact card stack (auto-width ~360 px):
 | vmstat attribution edge cases (e.g., future zram writeback) | `backing_dev` is read and, if non-`none`, attribution switches to `bd_stat` deltas; net-balance per-device view stays authoritative. |
 | Driver/kernel updates change file layouts | Parsers tolerate field-count drift; unknown fields ignored; missing → n/a. |
 | Quickshell API drift (0.3.x) | Pin docs to installed version; smoke-run on every update (scripted check in AGENTS.md). |
+
+## 9. Implementation notes & deviations (post-implementation record)
+
+### 9.1 Window model: PanelWindow (layer-shell), not FloatingWindow
+
+The mockup nominally says "FloatingWindow", but on Wayland a FloatingWindow:
+
+- cannot be programmatically positioned (no x/y API), so **position persistence is impossible**;
+- always floats above application windows and participates in focus — fighting the "desktop
+  furniture" requirement.
+
+The widget is therefore a `PanelWindow` (wlr layer-shell) with **left+top anchors and
+margin-based position**:
+
+- drag updates the persisted margins (`PersistentProperties`: posX/posY/pinned/collapsed);
+- unpinned it lives **below** application windows (true desktop widget); the pin (📌) button
+  toggles `aboveWindows` (top layer) — exactly what the mockup's pin means;
+- `exclusionMode: Ignore` so it never reserves screen space;
+- `focusable: false` so it never steals keyboard focus.
+
+### 9.2 Scope additions from the mockup
+
+The mockup added three things that were "out of scope" in §2. They are implemented:
+
+- **Top strip** with CPU (busy% + avg MHz), RAM, Swap, GPU VRAM ring gauges and a disk **I/O**
+  block (sparkline + R/W rates) — `service/Cpu.qml`, `service/DiskIo.qml` (`/proc/stat`,
+  `/proc/cpuinfo`, `/proc/diskstats` whole disks only);
+- **Header controls**: minimize (collapse to pill), pin (aboveWindows), close (quits the
+  instance — equivalent to the systemd kill switch);
+- **Footer chips** mirroring the safety posture.
+
+### 9.3 Quickshell 0.3.0 API gotchas (keep for future work)
+
+- `FileView.text` is a **function** in the public wrapper (`text()`), not a property; the
+  `onTextChanged` signal still fires on (re)load. Calling `text()` inside the handler is required.
+- Quickshell `Singleton`s are **lazily instantiated** on first reference. Collectors are only
+  instantiated early because the UI binds to them at startup. Test harnesses must reference
+  them via a binding (see the `Item` at the top of `shell/collector-check.qml`).
+- `PersistentProperties` persists properties declared *inside it* across reloads and restarts.
+- Quickshell forbids imports escaping the config root (`../..` from `shell/`), which is why
+  the collector check harness lives at `shell/collector-check.qml`.
+- Signal parameter injection (`onExited: exitCode => ...`) is deprecated; use arrow functions
+  with formal parameters.
+
+### 9.4 Verification performed (2026-08-31)
+
+- `scripts/parse-test.mjs` — 22 assertions against live `/proc`, `/sys` and synthetic
+  nvidia-smi output: all pass.
+- `shell/collector-check.qml` — live values match `free -h`, `/proc/swaps`, `mm_stat` ratio
+  (3.6x ≈ `zramctl`), and a live GPU process appeared correctly with a friendly name.
+- systemd service boots, journal clean, steady state ~1.6% CPU / 0.6% memory (300 MB RSS
+  including Qt runtime).

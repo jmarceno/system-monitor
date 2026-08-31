@@ -72,12 +72,20 @@ before implementing anything. UI/UX decisions live there; don't redesign them si
    - zram: `zramctl`, `cat /sys/block/zram0/mm_stat`
    - swap: `swapon --show`, `cat /proc/swaps`, `grep pswpin /proc/vmstat`
    - VRAM: `nvidia-smi`
-5. Commit only verified-working states; test the systemd service after any change
-   to launch code.
+5. Automated/parser checks: `node scripts/parse-test.mjs` (validates `shell/lib/Parse.js`
+   against live `/proc`/`/sys` — run after touching any parser).
+6. Headless collector check (prints live values, no window):
+   `quickshell -p shell/collector-check.qml`.
+7. Commit only verified-working states; test the systemd service after any change
+   to launch code (`systemctl --user restart qs-system-monitor`).
 
 ## QML / Quickshell Conventions
 
 - Follow Quickshell 0.3.x API (installed docs: `quickshell.outfoxxed.me/docs/v0.3.0`).
+- Quickshell 0.3.0 gotchas (see `PLAN.md` §9.3 for details): `FileView.text` is a
+  **function** (`text()`), singletons instantiate **lazily** on first reference, imports
+  must not escape the config root, `PersistentProperties` persists only properties
+  declared inside it.
 - No hardcoded user paths or thresholds — all knobs in `shell/Config.qml`.
 - Idempotent collectors: a quickshell live-reload must not duplicate timers or
   double-count state.

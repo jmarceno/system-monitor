@@ -28,18 +28,29 @@ This widget splits them, honestly:
 
 ## Current state
 
-📄 **Full implementation plan: [PLAN.md](./PLAN.md)** — phases M0–M4, data-source
-math, and safety precautions. Implementation not started yet.
+**Implemented and running** (M0–M4 of [PLAN.md](./PLAN.md)). The UI matches
+[mock/mockup.png](./mock/mockup.png): header with minimize/pin/close controls, a top strip
+with CPU/RAM/Swap/VRAM gauges and a disk-I/O sparkline, the Memory card, the highlighted
+**Swap Attribution** card, the zram card (with zswap/writeback chips), the NVIDIA VRAM top-
+consumers card, and the safety-posture footer chips.
 
-## How it will run (once M0 lands)
+Behavior:
+
+- **Drag the header** to place it anywhere; position persists across restarts.
+- Unpinned it lives **below** your windows (desktop furniture); **📌 pin** raises it above
+  everything. **−** collapses to a small pill; **✕** quits the instance.
+
+## Running it
 
 ```bash
-# Run manually from the project root
-quickshell -p ./shell
+# One-time install + enable + start (systemd user service)
+./scripts/install.sh --start
 
-# Or as a systemd user service (auto-start, kill switch)
-systemctl --user start qs-system-monitor
-systemctl --user stop  qs-system-monitor   # full kill switch
+# Kill switch
+systemctl --user stop qs-system-monitor
+
+# Run manually from the project root (dev mode, live-reloads on save)
+quickshell -p ./shell
 ```
 
 Requirements: Quickshell ≥ 0.3.0, KDE Plasma on Wayland, Linux ≥ 6.x with zram
@@ -58,8 +69,9 @@ the VRAM card (AMD fallback via fdinfo is planned in the code path).
 
 | File | Purpose |
 |---|---|
-| [PLAN.md](./PLAN.md) | Implementation plan, data-source formulas, milestones, risks |
+| [PLAN.md](./PLAN.md) | Implementation plan, data-source formulas, milestones, risks, implementation record |
 | [AGENTS.md](./AGENTS.md) | Scope, architecture rules and conventions for agents/contributors |
+| [mock/mockup.png](./mock/mockup.png) | UI mockup the implementation follows |
 
 ## License
 

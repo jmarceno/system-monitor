@@ -1,0 +1,13 @@
+[Unit]
+Description=Quickshell System Monitor (floating desktop widget)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=@QUICKSHELL_BIN@ -p @SHELL_DIR@/shell.qml
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target
