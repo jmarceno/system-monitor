@@ -51,7 +51,10 @@ Card {
     }
 
     Row {
-        visible: Zram.exists && Zram.hugePages > 0
+        // Only warn when huge pages exceed 10% of stored data — stray
+        // incompressible pages are normal; a flood means the pool is filling
+        // with data zram cannot actually shrink.
+        visible: Zram.exists && Zram.origBytes > 0 && Zram.hugePages * 4096 > 0.1 * Zram.origBytes
         spacing: 6
 
         Text {

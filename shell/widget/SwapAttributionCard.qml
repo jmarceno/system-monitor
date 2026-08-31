@@ -11,8 +11,6 @@ Card {
 
     icon: "⇄"
     title: "Swap Attribution"
-    highlight: true
-    iconColor: Theme.accentCyan
 
     Repeater {
         model: SwapDisk.areas
@@ -101,26 +99,6 @@ Card {
             font.pixelSize: Theme.fontSizeMd
             font.bold: true
             anchors.verticalCenter: parent.verticalCenter
-        }
-    }
-
-    Column {
-        width: parent.width
-        spacing: 1
-
-        Text {
-            width: parent.width
-            text: "If the disk swap area is not growing, nothing is being written to disk."
-            color: Theme.textMuted
-            font.pixelSize: Theme.fontSizeSm
-            wrapMode: Text.WordWrap
-        }
-        Text {
-            width: parent.width
-            text: "Raw paging/swapout corrected to avoid counting zram as disk I/O."
-            color: Theme.textMuted
-            font.pixelSize: Theme.fontSizeSm
-            wrapMode: Text.WordWrap
         }
     }
 
