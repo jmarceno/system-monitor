@@ -284,6 +284,10 @@ The mockup added three things that were "out of scope" in §2. They are implemen
   the collector check harness lives at `shell/collector-check.qml`.
 - Signal parameter injection (`onExited: exitCode => ...`) is deprecated; use arrow functions
   with formal parameters.
+- Never mutate persisted window state from a pointer **release** handler: the write-back can
+  race the drag that just finished (observed as "the widget only drags once"). Same-screen
+  drops leave the drag's position untouched; only cross-screen hand-offs rewrite state, and
+  window recreation is deferred via `Qt.callLater` so the old surface is fully released.
 
 ### 9.4 Verification performed (2026-08-31)
 

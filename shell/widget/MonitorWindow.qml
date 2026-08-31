@@ -151,7 +151,7 @@ Item {
         ctrl.winHandle = winComponent.createObject(ctrl, {
             screen: target
         });
-        if (old)
+        if (ctrl.winHandle && old)
             old.destroy();
     }
 
@@ -165,11 +165,11 @@ Item {
 
     // Drag may end over a different monitor: hand the widget off by
     // recreating it on the target screen, position under the cursor.
+    // NOTE: never mutate persisted state on a same-screen drop — the release
+    // handler must not fight the drag that just finished.
     function _handleDrop(win, mouseX, mouseY) {
-        if (!win.screen || Quickshell.screens.length < 2) {
-            _clampToScreen();
+        if (!win.screen || Quickshell.screens.length < 2)
             return;
-        }
 
         // Window-content offset: HeaderBar sits inside contentCol (margins 8).
         const contentOffset = 8;
@@ -179,20 +179,16 @@ Item {
         const grabY = contentOffset + mouseY;
 
         const target = _screenAt(cursorGlobalX, cursorGlobalY);
-        if (!target) {
-            _clampToScreen();
-            return;
-        }
-        if (target === win.screen) {
-            _clampToScreen();
-            return;
-        }
+        if (!target || target === win.screen)
+            return; // same screen: drag position is already authoritative
 
         persist.posX = Math.round(Format.clamp(cursorGlobalX - grabX - target.x, 0, Math.max(0, target.width - win.width)));
         persist.posY = Math.round(Format.clamp(cursorGlobalY - grabY - target.y, 0, Math.max(0, target.height - win.height)));
         persist.screenName = target.name;
         _saveState();
-        _spawnWindow();
+        // Defer so the old window (and its pointer grab) is fully released
+        // before the replacement is created.
+        Qt.callLater(_spawnWindow);
     }
 
     // ---- the window ---------------------------------------------------------
