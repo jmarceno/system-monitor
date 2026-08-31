@@ -77,7 +77,7 @@ Rectangle {
         }
         HeaderButton {
             glyph: "📌"
-            active: persist && persist.pinned
+            active: persist ? persist.pinned : false
             onClicked: root.pinToggled()
         }
         HeaderButton {
