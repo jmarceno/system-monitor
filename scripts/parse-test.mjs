@@ -68,21 +68,29 @@ check("no partitions/zram in diskstats",
     ds.every(d => /^(nvme\d+n\d+|sd[a-z]+|vd[a-z]+|hd[a-z]+|mmcblk\d+|sr\d+)$/.test(d.name)),
     JSON.stringify(ds.map(d => d.name)));
 
+const blockDs = Parse.parseBlockDiskstats(readFileSync("/proc/diskstats", "utf8"));
+check("block diskstats includes partitions", blockDs.some(d => /\d$/.test(d.name)),
+    JSON.stringify(blockDs.slice(0, 5)));
+const syntheticBlockDs = Parse.parseBlockDiskstats("8 1 sdd1 10 0 2048 0 20 0 4096 0 0 0\n");
+check("block diskstats reads sector counters", syntheticBlockDs[0].readSectors === 2048 && syntheticBlockDs[0].writeSectors === 4096,
+    JSON.stringify(syntheticBlockDs));
+
 // --- lsblk storage ---------------------------------------------------------
 const syntheticLsblk = 'PATH="/dev/sdd1" LABEL="Expansion" FSTYPE="ext4" ' +
     'FSAVAIL="853378957312" FSSIZE="1967845998592" FSUSED="1014430375936" ' +
-    'MOUNTPOINTS="/mnt/expansion" RM="0" TYPE="part" TRAN="" PKNAME="sdd"\n' +
+    'MOUNTPOINTS="/mnt/expansion" RM="0" TYPE="part" TRAN="" PKNAME="sdd" KNAME="sdd1"\n' +
     'PATH="/dev/sdd" LABEL="" FSTYPE="" FSAVAIL="" FSSIZE="" FSUSED="" ' +
-    'MOUNTPOINTS="" RM="0" TYPE="disk" TRAN="usb" PKNAME=""\n' +
+    'MOUNTPOINTS="" RM="0" TYPE="disk" TRAN="usb" PKNAME="" KNAME="sdd"\n' +
     'PATH="/dev/nvme0n1p1" LABEL="" FSTYPE="btrfs" FSAVAIL="10" ' +
-    'FSSIZE="100" FSUSED="90" MOUNTPOINTS="/var/log\\x0a/" RM="0" TYPE="part" TRAN="nvme" PKNAME="nvme0n1"\n';
+    'FSSIZE="100" FSUSED="90" MOUNTPOINTS="/var/log\\x0a/" RM="0" TYPE="part" TRAN="nvme" PKNAME="nvme0n1" KNAME="nvme0n1p1"\n';
 const syntheticVolumes = Parse.parseLsblk(syntheticLsblk);
 check("lsblk parses mounted volumes", syntheticVolumes.length === 2, JSON.stringify(syntheticVolumes));
 check("lsblk decodes mountpoint escapes", syntheticVolumes[1].mountPoint === "/", JSON.stringify(syntheticVolumes[1]));
 check("lsblk recognizes USB removable transport", syntheticVolumes[0].isRemovable === true);
 check("lsblk keeps byte-accurate free space", syntheticVolumes[0].availableBytes === 853378957312);
+check("lsblk keeps kernel block name", syntheticVolumes[0].blockName === "sdd1", JSON.stringify(syntheticVolumes[0]));
 
-const liveLsblk = execFileSync("lsblk", ["-bP", "-o", "PATH,LABEL,FSTYPE,FSAVAIL,FSSIZE,FSUSED,MOUNTPOINTS,RM,TYPE,TRAN,PKNAME"], { encoding: "utf8" });
+const liveLsblk = execFileSync("lsblk", ["-bP", "-o", "PATH,LABEL,FSTYPE,FSAVAIL,FSSIZE,FSUSED,MOUNTPOINTS,RM,TYPE,TRAN,PKNAME,KNAME"], { encoding: "utf8" });
 const liveVolumes = Parse.parseLsblk(liveLsblk);
 check("live lsblk finds mounted storage", liveVolumes.length > 0, `got ${liveVolumes.length}`);
 check("live lsblk exposes free bytes", liveVolumes.some(v => v.availableBytes >= 0), JSON.stringify(liveVolumes));

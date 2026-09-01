@@ -13,9 +13,10 @@ A readable, free-floating desktop widget for KDE Plasma on Wayland, built with
 - zram compression, RAM held and savings
 - Real disk swap usage and write rate, separated from zram activity
 - Total NVIDIA VRAM and top GPU-consuming processes
-- CPU, RAM, swap, VRAM and disk-I/O summaries at a glance
+- CPU, RAM, swap and VRAM summaries at a glance
 - An expandable full-height storage sidecar with free space for mounted internal
-  and removable devices; it refreshes automatically when media is added or removed
+  and removable devices, plus a per-device I/O sparkline; it refreshes automatically
+  when media is added or removed
 
 The main idea is simple: zram compaction happens in RAM, while disk swap is
 actual storage I/O. They should never be presented as the same kind of pressure.

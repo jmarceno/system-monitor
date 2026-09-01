@@ -65,6 +65,7 @@ shell/
 │   ├── SwapDisk.qml         # /proc/swaps (disk rows) + /proc/vmstat rates + attribution
 │   ├── Vram.qml             # nvidia-smi queries (+ fdinfo fallback path for AMD machines)
 │   ├── Storage.qml          # lsblk -bP → mounted device/free-space snapshots
+│   ├── StorageIo.qml        # /proc/diskstats → per-mounted-device I/O rates/history
 │   └── SystemSnapshot.qml   # Singleton aggregating all collectors into one reactive state
 ├── widget/
 │   ├── MonitorWindow.qml    # FloatingWindow, drag handling, persistence
@@ -166,7 +167,7 @@ Fallback paths (keep for AMD/other machines / future portability):
 Source: the allowlisted read-only query:
 
 ```
-lsblk -bP -o PATH,LABEL,FSTYPE,FSAVAIL,FSSIZE,FSUSED,MOUNTPOINTS,RM,TYPE,TRAN,PKNAME
+lsblk -bP -o PATH,LABEL,FSTYPE,FSAVAIL,FSSIZE,FSUSED,MOUNTPOINTS,RM,TYPE,TRAN,PKNAME,KNAME
 ```
 
 The parser keeps mounted non-swap filesystems, uses `LABEL` with a mountpoint
@@ -176,6 +177,17 @@ FireWire; the latter covers USB enclosures that expose `RM=0`. Duplicate RAID-tr
 rows are deduplicated by device path, and `/boot`/EFI implementation partitions
 are omitted from the Dolphin-style user storage list. Missing `lsblk` or an
 unreadable query produces an unavailable sidecar rather than a retry storm.
+
+### 4.6 Per-device storage I/O (`service/StorageIo.qml`)
+
+Source: `/proc/diskstats`, polled every **2 s**. The collector matches each
+mounted volume's `KNAME` from `lsblk` to its own cumulative read/write sector
+counters, converts 512-byte sectors to kB/s over the sampling interval, and
+keeps a bounded 40-point total-throughput history for the sidecar sparkline.
+Parent disks are not summed with their partitions, so each displayed filesystem
+shows the activity of the device that actually backs its mountpoint. A new or
+temporarily unavailable device starts with zero rates and fills its history after
+the next complete sample pair.
 
 Nuance shown in UI: per-process sum ≠ GPU total (driver-reserved + graphics overhead) — show total separately, never fake a "sum" as total.
 
@@ -221,7 +233,9 @@ contains separate `Internal drives` and `Removable drives` sections and is drive
 entirely by the latest `lsblk` snapshot; no device names or mount paths are stored
 in configuration.
 
-- One-line-per-metric, no graphs in v1 (rates as text arrows ▲▼ + color: green=compaction/idle, amber=slow drain, red=real disk swap-out).
+- Swap attribution remains one-line-per-metric with text rates and verdict colors;
+  each storage entry adds its own read/write rates and a compact I/O sparkline below
+  the mountpoint.
 - Click on any header collapses/expands that card; double-click grip hides to a small pill ("R18 z6 D0 V11.2") with tooltip — minimal desktop footprint mode.
 
 ## 6. Precautions ("do not break things")
@@ -229,12 +243,15 @@ in configuration.
 1. **No shell takeover**: launch as `quickshell -p <config path>` in a systemd *user* service; `plasmashell` untouched. Kill switch: `systemctl --user stop qs-system-monitor`.
 2. **Read-only I/O only.** A grep-guarded review rule in AGENTS.md: `Process.exec` commands must be from an allowlist (`nvidia-smi --query-*`, the exact `lsblk -bP` storage query, `pgrep`). No writes outside our own state file.
 3. **Never block the render loop.** All reads async (`FileView` async load, `Process` non-blocking); parse failures produce `n/a`, not exceptions.
-4. **Poll budget**: 1 s meminfo (tiny file), 2 s swap/zram (tiny files), 5 s `nvidia-smi`, and 5 s `lsblk` snapshots (small read-only subprocesses). Timers stop when window `visible: false`.
+4. **Poll budget**: 1 s meminfo (tiny file), 2 s swap/zram and per-device diskstats,
+   5 s `nvidia-smi`, and 5 s `lsblk` snapshots (small read-only subprocesses).
+   Timers stop when window `visible: false`.
 5. **Permission degradation**: if `mm_stat` unreadable (some setups restrict it), still show `/proc/swaps` zram Used with an "advanced stats unavailable" note. Never retry-storm.
 6. **Process races**: VRAM pid list re-validated against `/proc/<pid>/comm` every tick; dead pids dropped.
 7. **Layout edge cases**: mm_stat field-count variations; missing zram device (`/sys/block/zram*` glob empty → zram card renders "no zram configured"); multiple swap files (list each).
 8. **Reload safety**: all mutable state behind Singletons + `PersistentProperties`; quickshell live-reload must not duplicate timers (idempotent collectors).
-9. **Memory of the monitor itself**: keep snapshots tiny (no history buffers > a few samples in v1; no graphs yet).
+9. **Memory of the monitor itself**: keep snapshots tiny; per-device I/O histories
+   are capped at 40 points and are discarded when a device disappears.
 
 ## 7. Milestones
 
@@ -299,9 +316,10 @@ margin-based position**:
 
 The mockup added three things that were "out of scope" in §2. They are implemented:
 
-- **Top summary** with larger ring gauges arranged as CPU/GPU then RAM/Swap, followed by a
-  full-width disk **I/O** row (sparkline + R/W rates) — `service/Cpu.qml`,
-  `service/DiskIo.qml` (`/proc/stat`, `/proc/cpuinfo`, `/proc/diskstats` whole disks only);
+- **Top summary** with larger ring gauges arranged as CPU/GPU then RAM/Swap —
+  `service/Cpu.qml`, `service/Vram.qml`, `service/MemInfo.qml` and `service/SwapDisk.qml`;
+  per-device disk **I/O** moved to the expandable storage sidecar via
+  `service/StorageIo.qml` (`/proc/diskstats` matched by `lsblk` `KNAME`);
 - **Header controls**: minimize (collapse to pill), pin (aboveWindows), close (quits the
   instance — equivalent to the systemd kill switch);
 - **Footer chips** mirroring the safety posture.

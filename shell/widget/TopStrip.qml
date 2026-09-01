@@ -3,7 +3,7 @@ import ".."
 import "../lib/Format.js" as Format
 import "../service"
 
-// Top summary strip: two roomy gauge rows plus a full-width disk I/O row.
+// Top summary strip: two roomy gauge rows. Per-device I/O lives in StorageSidecar.
 Rectangle {
     id: root
 
@@ -64,50 +64,5 @@ Rectangle {
             }
         }
 
-        // Disk I/O gets the full card width so the chart is readable instead
-        // of being squeezed into the fifth gauge cell.
-        Column {
-            id: ioBlock
-            width: parent.width
-            spacing: 5
-
-            Row {
-                width: parent.width
-                spacing: 12
-
-                Text {
-                    id: ioTitle
-                    text: "I/O"
-                    color: Theme.text
-                    font.pixelSize: Theme.fontSizeMd
-                    font.bold: true
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-
-                Item { width: Math.max(0, parent.width - ioTitle.implicitWidth - ioRead.implicitWidth - ioWrite.implicitWidth - parent.spacing * 3); height: 1 }
-
-                Text {
-                    id: ioRead
-                    text: "R  " + Format.fmtRateKBps(DiskIo.readKBps)
-                    color: Theme.textMuted
-                    font.pixelSize: Theme.fontSizeMd
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-
-                Text {
-                    id: ioWrite
-                    text: "W  " + Format.fmtRateKBps(DiskIo.writeKBps)
-                    color: Theme.textMuted
-                    font.pixelSize: Theme.fontSizeMd
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-            }
-
-            Sparkline {
-                width: parent.width
-                height: 40
-                history: DiskIo.history
-            }
-        }
     }
 }

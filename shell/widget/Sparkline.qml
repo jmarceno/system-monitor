@@ -1,7 +1,7 @@
 import QtQuick
 import ".."
 
-// Tiny sparkline of DiskIo history (mockup I/O block).
+// Tiny sparkline of a bounded per-device I/O history.
 Item {
     id: root
 

@@ -3,7 +3,7 @@ singleton MemInfo 1.0 MemInfo.qml
 singleton Cpu 1.0 Cpu.qml
 singleton Zram 1.0 Zram.qml
 singleton SwapDisk 1.0 SwapDisk.qml
-singleton DiskIo 1.0 DiskIo.qml
 singleton Vram 1.0 Vram.qml
 singleton Storage 1.0 Storage.qml
+singleton StorageIo 1.0 StorageIo.qml
 singleton SystemSnapshot 1.0 SystemSnapshot.qml

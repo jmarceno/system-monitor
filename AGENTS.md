@@ -26,7 +26,7 @@ before implementing anything. UI/UX decisions live there; don't redesign them si
    `plasmashell`, KWin config, or compositor settings.
 2. **Strictly read-only system access.** Only read `/proc/*`, `/sys/*` and run
    read-only CLI queries from the allowlist: `nvidia-smi --query-*`, `lsblk -bP
-   -o PATH,LABEL,FSTYPE,FSAVAIL,FSSIZE,FSUSED,MOUNTPOINTS,RM,TYPE,TRAN,PKNAME`, `pgrep`.
+   -o PATH,LABEL,FSTYPE,FSAVAIL,FSSIZE,FSUSED,MOUNTPOINTS,RM,TYPE,TRAN,PKNAME,KNAME`, `pgrep`.
    **Never write to `/sys`** — no `reset`, `compact`, `mem_limit`, no zram
    reconfiguration. The zram `sysfs` attrs are config, not data.
 3. **No root, no sudo, no privileged helpers.** Missing permissions ⇒ render "n/a"

@@ -117,6 +117,27 @@ function parseDiskstats(text) {
     return out;
 }
 
+// All block devices, including partitions and mapped/RAID devices. Returns
+// [{name, readSectors, writeSectors}] so a mounted filesystem can be matched
+// to its own /proc/diskstats counters without aggregating unrelated devices.
+function parseBlockDiskstats(text) {
+    const out = [];
+    if (!text)
+        return out;
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+        const parts = lines[i].trim().split(/\s+/);
+        if (parts.length < 10)
+            continue;
+        out.push({
+            name: parts[2],
+            readSectors: toNum(parts[5]),
+            writeSectors: toNum(parts[9])
+        });
+    }
+    return out;
+}
+
 // ---- lsblk -----------------------------------------------------------------
 
 // Decode the escaped values emitted by `lsblk -P`, including escaped
@@ -131,7 +152,7 @@ function decodeLsblkValue(value) {
         .replace(/\\\\/g, "\\");
 }
 
-// `lsblk -bP -o PATH,LABEL,FSTYPE,FSAVAIL,FSSIZE,FSUSED,MOUNTPOINTS,RM,TYPE,TRAN,PKNAME`
+// `lsblk -bP -o PATH,LABEL,FSTYPE,FSAVAIL,FSSIZE,FSUSED,MOUNTPOINTS,RM,TYPE,TRAN,PKNAME,KNAME`
 // -> mounted filesystem rows with byte-accurate capacity information.
 // lsblk can repeat a device below a RAID tree, so PATH is deduplicated here.
 function parseLsblk(text) {
@@ -199,6 +220,7 @@ function parseLsblk(text) {
         seen[path] = true;
         out.push({
             path: path,
+            blockName: row.KNAME || path.split("/").pop(),
             label: row.LABEL || "",
             fsType: fsType,
             availableBytes: hasStats && row.FSAVAIL !== "" ? toNum(row.FSAVAIL) : -1,

@@ -24,7 +24,7 @@ Singleton {
     readonly property bool queryFailed: _queryFailed
     readonly property var command: [
         "lsblk", "-bP", "-o",
-        "PATH,LABEL,FSTYPE,FSAVAIL,FSSIZE,FSUSED,MOUNTPOINTS,RM,TYPE,TRAN,PKNAME"
+        "PATH,LABEL,FSTYPE,FSAVAIL,FSSIZE,FSUSED,MOUNTPOINTS,RM,TYPE,TRAN,PKNAME,KNAME"
     ]
 
     function _fallbackName(volume) {
@@ -42,6 +42,7 @@ Singleton {
             const available = v.availableBytes >= 0 ? v.availableBytes : -1;
             out.push({
                 path: v.path,
+                blockName: v.blockName,
                 label: v.label,
                 name: v.label || _fallbackName(v),
                 fsType: v.fsType,

@@ -93,14 +93,19 @@ Rectangle {
             width: parent.width
             height: Math.max(0, root.height - header.height - content.spacing - root.contentMargin * 2)
             clip: true
-            spacing: 6
+            spacing: 4
             model: Storage.rows
 
             delegate: Item {
                 id: row
                 required property var modelData
                 width: deviceList.width
-                height: modelData.kind === "section" ? 22 : 78
+                property int ioGeneration: StorageIo.generation
+                property var ioSnapshot: {
+                    const tick = ioGeneration;
+                    return StorageIo.sampleFor(modelData.kind === "volume" ? modelData.volume : null);
+                }
+                height: modelData.kind === "section" ? 18 : 88
 
                 Text {
                     visible: row.modelData.kind === "section"
@@ -122,8 +127,8 @@ Rectangle {
 
                     Column {
                         anchors.fill: parent
-                        anchors.margins: 8
-                        spacing: 3
+                        anchors.margins: 4
+                        spacing: 1
 
                         Row {
                             width: parent.width
@@ -164,7 +169,7 @@ Rectangle {
 
                         Bar {
                             width: parent.width
-                            height: 7
+                            height: 6
                             value: row.modelData.kind === "volume" ? row.modelData.volume.usedPct : 0
                             fillColor: row.modelData.kind === "volume" && row.modelData.volume.isRemovable
                                 ? Theme.accentAmber : Theme.accentBlue
@@ -176,6 +181,49 @@ Rectangle {
                             color: Theme.textFaint
                             font.pixelSize: Theme.fontSizeSm
                             elide: Text.ElideMiddle
+                        }
+
+                        Row {
+                            width: parent.width
+                            spacing: 5
+
+                            Text {
+                                id: ioLabel
+                                text: "I/O"
+                                color: Theme.text
+                                font.pixelSize: Theme.fontSizeSm
+                                font.bold: true
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+
+                            Item {
+                                width: Math.max(0, parent.width - ioLabel.implicitWidth - ioRead.implicitWidth - ioWrite.implicitWidth - parent.spacing * 3)
+                                height: 1
+                            }
+
+                            Text {
+                                id: ioRead
+                                text: "R  " + Format.fmtRateKBps(row.ioSnapshot.readKBps)
+                                color: Theme.textMuted
+                                font.pixelSize: Theme.fontSizeSm
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+
+                            Text {
+                                id: ioWrite
+                                text: "W  " + Format.fmtRateKBps(row.ioSnapshot.writeKBps)
+                                color: Theme.textMuted
+                                font.pixelSize: Theme.fontSizeSm
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
+
+                        Sparkline {
+                            width: parent.width
+                            height: 18
+                            history: row.ioSnapshot.history
+                            lineColor: row.modelData.kind === "volume" && row.modelData.volume.isRemovable
+                                ? Theme.accentAmber : Theme.accentCyan
                         }
                     }
                 }

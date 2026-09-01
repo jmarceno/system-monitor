@@ -10,7 +10,7 @@ Singleton {
     property int meminfoIntervalMs: 1000
     property int cpuIntervalMs: 1000
     property int swapIntervalMs: 2000
-    property int diskIoIntervalMs: 2000
+    property int diskIoIntervalMs: 2000 // per-device disk I/O
     property int vramIntervalMs: 5000
     property int vramAppsIntervalMs: 10000 // process list is the least volatile
     property int vramCollapsedIntervalMs: 15000

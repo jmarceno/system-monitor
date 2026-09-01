@@ -14,7 +14,7 @@ ShellRoot {
         property real b: Cpu.busyPct
         property bool c: Zram.exists
         property var d: SwapDisk.areas
-        property real e: DiskIo.readKBps
+        property var e: StorageIo.samples
         property var f: Vram.procs
         property var g: Storage.volumes
     }
@@ -56,8 +56,8 @@ ShellRoot {
                 "diskIn", f.fmtRateKBps(SwapDisk.diskSwapInKBps));
             console.log("verdict:", SwapDisk.verdictText);
 
-            console.log("=== DiskIo ===");
-            console.log("read:", f.fmtRateKBps(DiskIo.readKBps), "write:", f.fmtRateKBps(DiskIo.writeKBps));
+            console.log("=== StorageIo ===");
+            console.log("samples:", JSON.stringify(StorageIo.samples));
 
             console.log("=== Vram ===");
             console.log("avail:", Vram.available, f.fmtKB(Vram.gpuUsedMiB * 1024), "/", f.fmtKB(Vram.gpuTotalMiB * 1024), "(" + f.fmtPct(Vram.usedPct) + ")");
