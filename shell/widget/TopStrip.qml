@@ -3,92 +3,110 @@ import ".."
 import "../lib/Format.js" as Format
 import "../service"
 
-// Top summary strip: CPU / RAM / Swap / GPU VRAM ring gauges + disk I/O.
+// Top summary strip: two roomy gauge rows plus a full-width disk I/O row.
 Rectangle {
     id: root
 
-    implicitHeight: strip.implicitHeight + 16
+    implicitHeight: strip.implicitHeight + 20
     radius: 12
     color: Theme.cardBg
     border.width: 1
     border.color: Theme.cardBorder
 
-    Row {
+    Column {
         id: strip
         anchors.fill: parent
-        anchors.margins: 8
-        spacing: 4
+        anchors.margins: 10
+        spacing: 10
 
-        readonly property real cellWidth: (width - spacing * 4) / 5
+        // CPU and GPU stay together as compute load; RAM and swap form the
+        // second memory-pressure row. Two columns give every gauge enough
+        // room for a larger ring and an untruncated value.
+        Row {
+            width: parent.width
+            spacing: 12
 
-        RingGauge {
-            width: strip.cellWidth
-            label: "CPU"
-            value: Cpu.busyPct
-            ringColor: Theme.accentCyan
-            sub: Format.fmtMHz(Cpu.mhz)
+            RingGauge {
+                width: (parent.width - parent.spacing) / 2
+                label: "CPU"
+                value: Cpu.busyPct
+                ringColor: Theme.accentCyan
+                sub: Format.fmtMHz(Cpu.mhz)
+            }
+
+            RingGauge {
+                width: (parent.width - parent.spacing) / 2
+                label: "GPU VRAM"
+                value: Vram.usedPct
+                ringColor: Theme.accentAmber
+                sub: Vram.available ? Format.fmtKB(Vram.gpuUsedMiB * 1024) + " / " + Format.fmtKB(Vram.gpuTotalMiB * 1024) : "n/a"
+            }
         }
 
-        RingGauge {
-            width: strip.cellWidth
-            label: "RAM"
-            value: MemInfo.usedPct
-            ringColor: Theme.accentBlue
-            sub: MemInfo.ready ? Format.fmtKB(MemInfo.usedKB) + " / " + Format.fmtKB(MemInfo.totalKB) : "…"
+        Row {
+            width: parent.width
+            spacing: 12
+
+            RingGauge {
+                width: (parent.width - parent.spacing) / 2
+                label: "RAM"
+                value: MemInfo.usedPct
+                ringColor: Theme.accentBlue
+                sub: MemInfo.ready ? Format.fmtKB(MemInfo.usedKB) + " / " + Format.fmtKB(MemInfo.totalKB) : "…"
+            }
+
+            RingGauge {
+                width: (parent.width - parent.spacing) / 2
+                label: "Swap"
+                value: SwapDisk.usedPct
+                ringColor: SwapDisk.verdict === 3 ? Theme.accentRed : Theme.accentCyan
+                sub: SwapDisk.totalSizeKB > 0 ? Format.fmtKB(SwapDisk.totalUsedKB) + " / " + Format.fmtKB(SwapDisk.totalSizeKB) : "…"
+            }
         }
 
-        RingGauge {
-            width: strip.cellWidth
-            label: "Swap"
-            value: SwapDisk.usedPct
-            ringColor: SwapDisk.verdict === 3 ? Theme.accentRed : Theme.accentCyan
-            sub: SwapDisk.totalSizeKB > 0 ? Format.fmtKB(SwapDisk.totalUsedKB) + " / " + Format.fmtKB(SwapDisk.totalSizeKB) : "…"
-        }
-
-        RingGauge {
-            width: strip.cellWidth
-            label: "GPU VRAM"
-            value: Vram.usedPct
-            ringColor: Theme.accentAmber
-            sub: Vram.available ? Format.fmtKB(Vram.gpuUsedMiB * 1024) + " / " + Format.fmtKB(Vram.gpuTotalMiB * 1024) : "n/a"
-        }
-
-        // Disk I/O block (mockup): sparkline + R/W rates.
+        // Disk I/O gets the full card width so the chart is readable instead
+        // of being squeezed into the fifth gauge cell.
         Column {
             id: ioBlock
-            width: strip.cellWidth
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 2
+            width: parent.width
+            spacing: 5
 
             Row {
                 width: parent.width
-                spacing: 6
+                spacing: 12
+
                 Text {
-                    id: ioLabel
+                    id: ioTitle
                     text: "I/O"
+                    color: Theme.text
+                    font.pixelSize: Theme.fontSizeMd
+                    font.bold: true
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                Item { width: Math.max(0, parent.width - ioTitle.implicitWidth - ioRead.implicitWidth - ioWrite.implicitWidth - parent.spacing * 3); height: 1 }
+
+                Text {
+                    id: ioRead
+                    text: "R  " + Format.fmtRateKBps(DiskIo.readKBps)
                     color: Theme.textMuted
-                    font.pixelSize: Theme.fontSizeSm
+                    font.pixelSize: Theme.fontSizeMd
                     anchors.verticalCenter: parent.verticalCenter
                 }
-                Sparkline {
-                    width: Math.max(24, ioBlock.width - ioLabel.implicitWidth - 6)
-                    history: DiskIo.history
+
+                Text {
+                    id: ioWrite
+                    text: "W  " + Format.fmtRateKBps(DiskIo.writeKBps)
+                    color: Theme.textMuted
+                    font.pixelSize: Theme.fontSizeMd
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
-            Text {
+
+            Sparkline {
                 width: parent.width
-                text: "R  " + Format.fmtRateKBps(DiskIo.readKBps)
-                color: Theme.text
-                font.pixelSize: Theme.fontSizeSm
-                elide: Text.ElideRight
-            }
-            Text {
-                width: parent.width
-                text: "W  " + Format.fmtRateKBps(DiskIo.writeKBps)
-                color: Theme.text
-                font.pixelSize: Theme.fontSizeSm
-                elide: Text.ElideRight
+                height: 40
+                history: DiskIo.history
             }
         }
     }

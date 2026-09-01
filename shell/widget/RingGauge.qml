@@ -2,7 +2,7 @@ import QtQuick
 import ".."
 import "../lib/Format.js" as Format
 
-// Small ring gauge for the top strip (CPU / RAM / Swap / VRAM).
+// Summary ring gauge sized for a two-column top strip.
 Item {
     id: root
 
@@ -11,9 +11,9 @@ Item {
     property string label: ""
     property string sub: ""
 
-    implicitWidth: ringSize + 54
+    implicitWidth: ringSize + 86
     implicitHeight: ringSize
-    property int ringSize: 36
+    property int ringSize: 54
 
     Canvas {
         id: ring
@@ -25,9 +25,9 @@ Item {
         onPaint: {
             const ctx = getContext("2d");
             ctx.reset();
-            ctx.lineWidth = 5;
+            ctx.lineWidth = 6;
             ctx.lineCap = "rounded";
-            const cx = width / 2, cy = height / 2, r = width / 2 - 4;
+            const cx = width / 2, cy = height / 2, r = width / 2 - 5;
             const start = 0.75 * Math.PI, span = 1.5 * Math.PI;
             ctx.strokeStyle = Qt.rgba(Theme.track.r, Theme.track.g, Theme.track.b, 1);
             ctx.beginPath();
@@ -53,7 +53,7 @@ Item {
     Column {
         id: textCol
         anchors.left: ring.right
-        anchors.leftMargin: 6
+        anchors.leftMargin: 10
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
         spacing: 0
@@ -61,14 +61,15 @@ Item {
         Text {
             text: root.label
             color: Theme.textMuted
-            font.pixelSize: Theme.fontSizeSm
+            font.pixelSize: Theme.fontSizeMd
+            font.bold: true
             width: parent.width
             elide: Text.ElideRight
         }
         Text {
             text: isFinite(root.value) ? Math.round(root.value) + "%" : "n/a"
             color: Theme.text
-            font.pixelSize: Theme.fontSizeLg
+            font.pixelSize: 18
             font.bold: true
             width: parent.width
             elide: Text.ElideRight
@@ -76,7 +77,7 @@ Item {
         Text {
             text: root.sub
             color: Theme.textFaint
-            font.pixelSize: Theme.fontSizeSm
+            font.pixelSize: Theme.fontSizeMd
             width: parent.width
             elide: Text.ElideRight
         }

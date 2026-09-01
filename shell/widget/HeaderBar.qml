@@ -2,7 +2,7 @@ import QtQuick
 import ".."
 import "../lib/Format.js" as Format
 
-// Window header: icon, title, subtitle, window controls (− / pin / ✕).
+// Window header: icon, title, window controls (− / pin / ✕).
 // The whole header doubles as the drag grip — drag logic lives here and
 // updates the layer-shell margins via the persisted posX/posY properties.
 Rectangle {
@@ -46,21 +46,12 @@ Rectangle {
             }
         }
 
-        Column {
+        Text {
             anchors.verticalCenter: parent.verticalCenter
-            spacing: 0
-
-            Text {
-                text: "Quickshell System Monitor"
-                color: Theme.text
-                font.pixelSize: Theme.fontSizeXl + 1
-                font.bold: true
-            }
-            Text {
-                text: "PanelWindow · persistent position · read-only"
-                color: Theme.textFaint
-                font.pixelSize: Theme.fontSizeSm
-            }
+            text: "System Monitor"
+            color: Theme.text
+            font.pixelSize: Theme.fontSizeXl + 1
+            font.bold: true
         }
     }
 

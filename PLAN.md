@@ -265,9 +265,9 @@ margin-based position**:
 
 The mockup added three things that were "out of scope" in §2. They are implemented:
 
-- **Top strip** with CPU (busy% + avg MHz), RAM, Swap, GPU VRAM ring gauges and a disk **I/O**
-  block (sparkline + R/W rates) — `service/Cpu.qml`, `service/DiskIo.qml` (`/proc/stat`,
-  `/proc/cpuinfo`, `/proc/diskstats` whole disks only);
+- **Top summary** with larger ring gauges arranged as CPU/GPU then RAM/Swap, followed by a
+  full-width disk **I/O** row (sparkline + R/W rates) — `service/Cpu.qml`,
+  `service/DiskIo.qml` (`/proc/stat`, `/proc/cpuinfo`, `/proc/diskstats` whole disks only);
 - **Header controls**: minimize (collapse to pill), pin (aboveWindows), close (quits the
   instance — equivalent to the systemd kill switch);
 - **Footer chips** mirroring the safety posture.
