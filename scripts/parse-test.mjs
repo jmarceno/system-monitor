@@ -83,8 +83,8 @@ check("nvidia gpu query", used === 11213 && totalMiB === 12288);
 
 const apps = Parse.parseNvidiaApps(
     "1163, 25, /usr/bin/kwin_wayland\n" +
-    "37034, 4516, /home/jmarceno/Software/AppImages/opencode_beta.appimage\n" +
-    "37883, 3564, /home/jmarceno/x/llama-cli --some args\n");
+    "37034, 4516, /opt/opencode_beta.appimage\n" +
+    "37883, 3564, /usr/local/bin/llama-cli --some args\n");
 check("nvidia apps count", apps.length === 3, `got ${apps.length}`);
 check("nvidia app basename", apps[0].name === "kwin_wayland" && apps[1].name === "opencode_beta.appimage",
     JSON.stringify(apps.map(a => a.name)));
