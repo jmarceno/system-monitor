@@ -1,77 +1,53 @@
-# System Monitor (Quickshell · KDE Plasma)
+# System Monitor
 
-A free-floating desktop widget for KDE Plasma (Wayland) built with
-[Quickshell](https://quickshell.outfoxxed.me/) that shows the memory truth other
-monitors hide.
+A readable, free-floating desktop widget for KDE Plasma on Wayland, built with
+[Quickshell](https://quickshell.outfoxxed.me/).
 
-## Why this exists
+<p align="center">
+  <img src="./mock/screenshot.png" alt="System Monitor widget showing memory, swap attribution, zram and NVIDIA VRAM" width="437">
+</p>
 
-Every mainstream monitor conflates **zram compaction** (anonymous pages compressed
-in RAM — cheap and healthy) with **real disk swap** (pages written to disk — slow
-and a memory-pressure warning). A single combined "swap used" bar makes healthy
-zram activity look like disk thrashing and leads to wrong workload and
-optimization decisions.
+## What it shows
 
-This widget splits them, honestly:
+- RAM used, available memory, cache and memory pressure
+- zram compression, RAM held and savings
+- Real disk swap usage and write rate, separated from zram activity
+- Total NVIDIA VRAM and top GPU-consuming processes
+- CPU, RAM, swap, VRAM and disk-I/O summaries at a glance
 
-- **RAM used / available** — real usage, with cache/reclaimable separated so the number isn't inflated.
-- **zram stats** — logical data stored → compressed size → compression ratio → actual RAM held → RAM saved.
-- **Real disk swap stats** — per-device size/used and the *net rate of change*: if the disk swap file isn't growing, **nothing is being written to disk**, period.
-- **Top VRAM consumers** — total GPU memory plus the top processes by VRAM, with friendly process names (crucial when local LLMs share the GPU with desktop apps).
+The main idea is simple: zram compaction happens in RAM, while disk swap is
+actual storage I/O. They should never be presented as the same kind of pressure.
 
-## Design goals
-
-1. **Truthful attribution** — never reports "swapping to disk" unless disk swap is actually changing.
-2. **Non-invasive** — runs alongside `plasmashell` as a plain user process; never replaces any Plasma component; read-only access to `/proc` and `/sys`; no root.
-3. **Practical & readable** — one line per metric, color-coded verdicts (✔ in-RAM compaction, ✖ real disk swap).
-4. **Placeable** — draggable anywhere on any monitor; position persists across restarts.
-
-## Current state
-
-**Implemented and running** (M0–M4 of [PLAN.md](./PLAN.md)). The UI matches
-[mock/mockup.png](./mock/mockup.png): header with minimize/pin/close controls, a top strip
-with CPU/RAM/Swap/VRAM gauges and a disk-I/O sparkline, the Memory card, the highlighted
-**Swap Attribution** card, the zram card (with zswap/writeback chips), the NVIDIA VRAM top-
-consumers card, and the safety-posture footer chips.
-
-Behavior:
-
-- **Drag the header** to place it anywhere; position persists across restarts.
-- Unpinned it lives **below** your windows (desktop furniture); **📌 pin** raises it above
-  everything. **−** collapses to a small pill; **✕** quits the instance.
-
-## Running it
+## Run
 
 ```bash
-# One-time install + enable + start (systemd user service)
+# Install, enable and start the user service
 ./scripts/install.sh --start
 
-# Kill switch
-systemctl --user stop qs-system-monitor
-
-# Run manually from the project root (dev mode, live-reloads on save)
+# Or run directly during development (live reload)
 quickshell -p ./shell
 ```
 
-Requirements: Quickshell ≥ 0.3.0, KDE Plasma on Wayland, Linux ≥ 6.x with zram
-(optional — card degrades gracefully without it). NVIDIA needs `nvidia-smi` for
-the VRAM card (AMD fallback via fdinfo is planned in the code path).
+To stop the service:
 
-## Safety posture
+```bash
+systemctl --user stop qs-system-monitor
+```
 
-- **Read-only**: reads `/proc/meminfo`, `/proc/swaps`, `/proc/vmstat`,
-  `/sys/block/zram0/*`, and runs read-only `nvidia-smi --query-*` commands. Never
-  writes to `/sys`, never touches zram configuration.
-- **No root**, no privileged helpers, no sudo prompts.
-- **Kill switch** is a single systemd stop; Plasma is untouched by design.
+Requires Quickshell 0.3+, KDE Plasma on Wayland and Linux. zram is optional;
+the widget degrades gracefully when it is unavailable. NVIDIA VRAM details use
+`nvidia-smi` when available.
+
+## Safety
+
+The widget runs alongside Plasma as a normal user process. It only reads system
+statistics from `/proc` and `/sys` and uses read-only `nvidia-smi` queries. It
+does not require root, change zram configuration or replace any Plasma component.
 
 ## Documentation
 
-| File | Purpose |
-|---|---|
-| [PLAN.md](./PLAN.md) | Implementation plan, data-source formulas, milestones, risks, implementation record |
-| [AGENTS.md](./AGENTS.md) | Scope, architecture rules and conventions for agents/contributors |
-| [mock/mockup.png](./mock/mockup.png) | UI mockup the implementation follows |
+- [PLAN.md](./PLAN.md) — architecture, formulas and implementation milestones
+- [AGENTS.md](./AGENTS.md) — contributor and safety rules
 
 ## License
 
