@@ -25,7 +25,8 @@ before implementing anything. UI/UX decisions live there; don't redesign them si
    `quickshell -p ./shell` (manual) or a systemd *user* service. Never touch
    `plasmashell`, KWin config, or compositor settings.
 2. **Strictly read-only system access.** Only read `/proc/*`, `/sys/*` and run
-   read-only CLI queries from the allowlist: `nvidia-smi --query-*`, `pgrep`.
+   read-only CLI queries from the allowlist: `nvidia-smi --query-*`, `lsblk -bP
+   -o PATH,LABEL,FSTYPE,FSAVAIL,FSSIZE,FSUSED,MOUNTPOINTS,RM,TYPE,TRAN,PKNAME`, `pgrep`.
    **Never write to `/sys`** — no `reset`, `compact`, `mem_limit`, no zram
    reconfiguration. The zram `sysfs` attrs are config, not data.
 3. **No root, no sudo, no privileged helpers.** Missing permissions ⇒ render "n/a"
@@ -51,6 +52,9 @@ before implementing anything. UI/UX decisions live there; don't redesign them si
 - The current machine is NVIDIA (RTX 3060): `nvidia-smi` is the VRAM primary path;
   AMD fdinfo fallback stays in the design but is secondary. Validate pids against
   `/proc/<pid>/comm` every tick to guard PID-reuse races.
+- Storage volumes come from the read-only `lsblk -bP` query. Filter to mounted
+  filesystems, group them into internal/removable sections, and never add a
+  mount path or device name to `Config.qml`.
 
 ## Known Environment Facts (verified 2026-08, Manjaro, kernel 6.12)
 

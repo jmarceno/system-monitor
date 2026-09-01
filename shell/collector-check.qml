@@ -16,6 +16,7 @@ ShellRoot {
         property var d: SwapDisk.areas
         property real e: DiskIo.readKBps
         property var f: Vram.procs
+        property var g: Storage.volumes
     }
 
     Timer {
@@ -61,6 +62,9 @@ ShellRoot {
             console.log("=== Vram ===");
             console.log("avail:", Vram.available, f.fmtKB(Vram.gpuUsedMiB * 1024), "/", f.fmtKB(Vram.gpuTotalMiB * 1024), "(" + f.fmtPct(Vram.usedPct) + ")");
             console.log("procs:", JSON.stringify(Vram.procs));
+
+            console.log("=== Storage ===");
+            console.log("ready:", Storage.ready, "volumes:", JSON.stringify(Storage.volumes));
 
             console.log("=== ALL CHECKS DONE ===");
             Qt.quit();

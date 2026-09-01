@@ -16,4 +16,5 @@ Singleton {
     readonly property var swap: SwapDisk
     readonly property var diskIo: DiskIo
     readonly property var vram: Vram
+    readonly property var storage: Storage
 }

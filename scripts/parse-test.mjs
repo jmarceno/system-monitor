@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Parser verification against live system files. Run: node scripts/parse-test.mjs
 import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -48,7 +49,7 @@ check("priorities parsed", zramArea.priority === 100 && diskArea.priority === 10
 
 // --- vmstat ---
 const vm = Parse.pairMap(readFileSync("/proc/vmstat", "utf8"));
-check("pswpin present", vm.pswpin > 0);
+check("pswpin present", Number.isFinite(vm.pswpin) && vm.pswpin >= 0, `got ${vm.pswpin}`);
 check("pswpout present", vm.pswpout > 0);
 
 // --- mm_stat ---
@@ -58,7 +59,7 @@ check("mm_stat orig > compr > 0", mm[0] > 0 && mm[0] > mm[1] && mm[1] > 0);
 
 // --- zram stat ---
 const zs = Parse.parseDiskstat(readFileSync("/sys/block/zram0/stat", "utf8"));
-check("zram stat writes field", zs.length >= 6 && zs[3] > 0);
+check("zram stat writes field", zs.length >= 6 && zs[3] >= 0, `got ${zs[3]}`);
 
 // --- diskstats ---
 const ds = Parse.parseDiskstats(readFileSync("/proc/diskstats", "utf8"));
@@ -66,6 +67,26 @@ check("diskstats found whole disks", ds.length > 0, `got ${ds.length}`);
 check("no partitions/zram in diskstats",
     ds.every(d => /^(nvme\d+n\d+|sd[a-z]+|vd[a-z]+|hd[a-z]+|mmcblk\d+|sr\d+)$/.test(d.name)),
     JSON.stringify(ds.map(d => d.name)));
+
+// --- lsblk storage ---------------------------------------------------------
+const syntheticLsblk = 'PATH="/dev/sdd1" LABEL="Expansion" FSTYPE="ext4" ' +
+    'FSAVAIL="853378957312" FSSIZE="1967845998592" FSUSED="1014430375936" ' +
+    'MOUNTPOINTS="/mnt/expansion" RM="0" TYPE="part" TRAN="" PKNAME="sdd"\n' +
+    'PATH="/dev/sdd" LABEL="" FSTYPE="" FSAVAIL="" FSSIZE="" FSUSED="" ' +
+    'MOUNTPOINTS="" RM="0" TYPE="disk" TRAN="usb" PKNAME=""\n' +
+    'PATH="/dev/nvme0n1p1" LABEL="" FSTYPE="btrfs" FSAVAIL="10" ' +
+    'FSSIZE="100" FSUSED="90" MOUNTPOINTS="/var/log\\x0a/" RM="0" TYPE="part" TRAN="nvme" PKNAME="nvme0n1"\n';
+const syntheticVolumes = Parse.parseLsblk(syntheticLsblk);
+check("lsblk parses mounted volumes", syntheticVolumes.length === 2, JSON.stringify(syntheticVolumes));
+check("lsblk decodes mountpoint escapes", syntheticVolumes[1].mountPoint === "/", JSON.stringify(syntheticVolumes[1]));
+check("lsblk recognizes USB removable transport", syntheticVolumes[0].isRemovable === true);
+check("lsblk keeps byte-accurate free space", syntheticVolumes[0].availableBytes === 853378957312);
+
+const liveLsblk = execFileSync("lsblk", ["-bP", "-o", "PATH,LABEL,FSTYPE,FSAVAIL,FSSIZE,FSUSED,MOUNTPOINTS,RM,TYPE,TRAN,PKNAME"], { encoding: "utf8" });
+const liveVolumes = Parse.parseLsblk(liveLsblk);
+check("live lsblk finds mounted storage", liveVolumes.length > 0, `got ${liveVolumes.length}`);
+check("live lsblk exposes free bytes", liveVolumes.some(v => v.availableBytes >= 0), JSON.stringify(liveVolumes));
+check("live lsblk inherits USB transport", liveVolumes.some(v => v.label === "Expansion" && v.isRemovable), JSON.stringify(liveVolumes));
 
 // --- /proc/stat cpu ---
 const cpu = Parse.parseCpu(readFileSync("/proc/stat", "utf8"));

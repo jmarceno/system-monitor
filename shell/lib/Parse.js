@@ -1,4 +1,4 @@
-// Pure parsing helpers for /proc, /sys and nvidia-smi output.
+// Pure parsing helpers for /proc, /sys, lsblk and nvidia-smi output.
 // Keep these functions side-effect free so they can be tested standalone
 // (scripts/parse-test.mjs exercises the same logic in node).
 .pragma library
@@ -112,6 +112,103 @@ function parseDiskstats(text) {
             name: name,
             readSectors: toNum(parts[5]),
             writeSectors: toNum(parts[9])
+        });
+    }
+    return out;
+}
+
+// ---- lsblk -----------------------------------------------------------------
+
+// Decode the escaped values emitted by `lsblk -P`, including escaped
+// newlines in MOUNTPOINTS. Unknown keys are intentionally ignored so newer
+// util-linux fields do not break the collector.
+function decodeLsblkValue(value) {
+    return value
+        .replace(/\\x([0-9a-fA-F]{2})/g, function (_, hex) {
+            return String.fromCharCode(parseInt(hex, 16));
+        })
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, "\\");
+}
+
+// `lsblk -bP -o PATH,LABEL,FSTYPE,FSAVAIL,FSSIZE,FSUSED,MOUNTPOINTS,RM,TYPE,TRAN,PKNAME`
+// -> mounted filesystem rows with byte-accurate capacity information.
+// lsblk can repeat a device below a RAID tree, so PATH is deduplicated here.
+function parseLsblk(text) {
+    const out = [];
+    const seen = {};
+    if (!text)
+        return out;
+
+    const rawRows = [];
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+        const row = {};
+        const re = /([A-Z0-9_]+)="((?:\\.|[^"])*)"/g;
+        let match;
+        while ((match = re.exec(lines[i])) !== null)
+            row[match[1]] = decodeLsblkValue(match[2]);
+        if (row.PATH)
+            rawRows.push(row);
+    }
+
+    const byPath = {};
+    for (let i = 0; i < rawRows.length; i++)
+        byPath[rawRows[i].PATH] = rawRows[i];
+
+    for (let i = 0; i < rawRows.length; i++) {
+        const row = rawRows[i];
+
+        const path = row.PATH || "";
+        const fsType = row.FSTYPE || "";
+        const mountPoints = (row.MOUNTPOINTS || "")
+            .split("\n")
+            .map(function (p) { return p.trim(); })
+            .filter(function (p) { return p && p !== "[SWAP]"; });
+
+        // Free space is a filesystem property; unmounted disks and swap areas
+        // are not part of this widget's free-space device list.
+        if (!path || path.indexOf("/dev/") !== 0 || !fsType || fsType === "swap" || mountPoints.length === 0)
+            continue;
+        if (seen[path])
+            continue;
+
+        // Root is the useful representative when a Btrfs filesystem has
+        // several system subvolume mountpoints (/var/cache, /var/log, ...).
+        mountPoints.sort(function (a, b) { return a.length - b.length; });
+        const mountPoint = mountPoints[0];
+        // EFI/boot partitions are implementation details, not Dolphin-style
+        // user storage entries.
+        if (mountPoint === "/boot" || mountPoint.indexOf("/boot/") === 0)
+            continue;
+
+        // A partition often has an empty TRAN field (notably USB enclosures),
+        // so follow PKNAME through the complete block-device chain.
+        let cursor = row;
+        let transport = "";
+        let removable = false;
+        for (let depth = 0; cursor && depth < 16; depth++) {
+            if (!transport && cursor.TRAN)
+                transport = cursor.TRAN.toLowerCase();
+            if (cursor.RM === "1")
+                removable = true;
+            cursor = cursor.PKNAME ? byPath["/dev/" + cursor.PKNAME] : null;
+        }
+        removable = removable || transport === "usb" || transport === "mmc" || transport === "firewire";
+        const hasStats = row.FSSIZE !== undefined && row.FSSIZE !== "";
+        seen[path] = true;
+        out.push({
+            path: path,
+            label: row.LABEL || "",
+            fsType: fsType,
+            availableBytes: hasStats && row.FSAVAIL !== "" ? toNum(row.FSAVAIL) : -1,
+            sizeBytes: hasStats ? toNum(row.FSSIZE) : -1,
+            usedBytes: hasStats && row.FSUSED !== "" ? toNum(row.FSUSED) : -1,
+            mountPoint: mountPoint,
+            mountPoints: mountPoints,
+            isRemovable: removable,
+            transport: transport,
+            type: row.TYPE || ""
         });
     }
     return out;

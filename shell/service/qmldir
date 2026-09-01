@@ -5,4 +5,5 @@ singleton Zram 1.0 Zram.qml
 singleton SwapDisk 1.0 SwapDisk.qml
 singleton DiskIo 1.0 DiskIo.qml
 singleton Vram 1.0 Vram.qml
+singleton Storage 1.0 Storage.qml
 singleton SystemSnapshot 1.0 SystemSnapshot.qml

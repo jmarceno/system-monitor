@@ -14,6 +14,8 @@ A readable, free-floating desktop widget for KDE Plasma on Wayland, built with
 - Real disk swap usage and write rate, separated from zram activity
 - Total NVIDIA VRAM and top GPU-consuming processes
 - CPU, RAM, swap, VRAM and disk-I/O summaries at a glance
+- An expandable full-height storage sidecar with free space for mounted internal
+  and removable devices; it refreshes automatically when media is added or removed
 
 The main idea is simple: zram compaction happens in RAM, while disk swap is
 actual storage I/O. They should never be presented as the same kind of pressure.
@@ -41,8 +43,8 @@ the widget degrades gracefully when it is unavailable. NVIDIA VRAM details use
 ## Safety
 
 The widget runs alongside Plasma as a normal user process. It only reads system
-statistics from `/proc` and `/sys` and uses read-only `nvidia-smi` queries. It
-does not require root, change zram configuration or replace any Plasma component.
+statistics from `/proc` and `/sys`, plus read-only `nvidia-smi` and `lsblk` queries.
+It does not require root, change zram configuration or replace any Plasma component.
 
 ## Documentation
 

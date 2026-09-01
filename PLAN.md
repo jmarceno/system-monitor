@@ -1,6 +1,6 @@
 # Implementation Plan — `system-monitor` (Quickshell widget for KDE Plasma)
 
-> **Status: implemented (M0–M4).** The widget matches `mock/mockup.png` and runs as a
+> **Status: implemented (M0–M5).** The widget matches `mock/mockup.png` and runs as a
 > systemd user service. Deviations from this plan are documented in §9.
 
 Target environment (verified on this machine):
@@ -40,6 +40,8 @@ A **single floating desktop widget** (not a bar, not a panel, not a shell replac
 2. **zram stats**: logical data stored, compressed size, compression ratio, actual RAM consumed, savings.
 3. **Real disk swap stats**: per-device size/used, *net rate of change* per device (is anything actually being written to the NVMe?), plus system-wide swap-in/out throughput attributed to zram vs disk.
 4. **Top VRAM consumers**: total VRAM used + top N processes by GPU memory with process names.
+5. **Mounted storage sidecar**: free/used/total space for the same mounted internal
+   and removable filesystem devices users see in Dolphin.
 
 **Explicitly out of scope (for now):** CPU/network graphs, theming beyond a sane dark card look,
 audio, battery, per-core stats, replacing any Plasma component.
@@ -62,6 +64,7 @@ shell/
 │   ├── Zram.qml             # /sys/block/zram0/{mm_stat,stat,io_stat} + /proc/swaps zram row
 │   ├── SwapDisk.qml         # /proc/swaps (disk rows) + /proc/vmstat rates + attribution
 │   ├── Vram.qml             # nvidia-smi queries (+ fdinfo fallback path for AMD machines)
+│   ├── Storage.qml          # lsblk -bP → mounted device/free-space snapshots
 │   └── SystemSnapshot.qml   # Singleton aggregating all collectors into one reactive state
 ├── widget/
 │   ├── MonitorWindow.qml    # FloatingWindow, drag handling, persistence
@@ -69,6 +72,7 @@ shell/
 │   ├── ZramCard.qml
 │   ├── SwapCard.qml
 │   ├── VramCard.qml
+│   ├── StorageSidecar.qml   # expandable full-height mounted-device list
 │   └── lib/Format.qml       # bytes/kB→human readable, rates, pct bars
 └── assets/                  # icons if needed
 ```
@@ -157,6 +161,22 @@ Fallback paths (keep for AMD/other machines / future portability):
 - Generic: scan `/proc/*/fdinfo/*` for `drm-` fields (`vram`, `gtt`, `dma-buf`) — works with amdgpu fdinfo.
 - Graceful degrade when `nvidia-smi` missing: hide card, log once.
 
+### 4.5 Mounted storage (`service/Storage.qml`)
+
+Source: the allowlisted read-only query:
+
+```
+lsblk -bP -o PATH,LABEL,FSTYPE,FSAVAIL,FSSIZE,FSUSED,MOUNTPOINTS,RM,TYPE,TRAN,PKNAME
+```
+
+The parser keeps mounted non-swap filesystems, uses `LABEL` with a mountpoint
+fallback for the display name, and reports byte-accurate `FSAVAIL`, `FSSIZE` and
+`FSUSED`. Devices are marked removable when `RM=1` or the transport is USB/MMC/
+FireWire; the latter covers USB enclosures that expose `RM=0`. Duplicate RAID-tree
+rows are deduplicated by device path, and `/boot`/EFI implementation partitions
+are omitted from the Dolphin-style user storage list. Missing `lsblk` or an
+unreadable query produces an unavailable sidecar rather than a retry storm.
+
 Nuance shown in UI: per-process sum ≠ GPU total (driver-reserved + graphics overhead) — show total separately, never fake a "sum" as total.
 
 ## 5. UI & interaction
@@ -195,15 +215,21 @@ Vertical compact card stack (auto-width ~360 px):
 └──────────────────────────────────┘
 ```
 
+The storage sidecar is a narrow tab on the right when closed. Clicking its arrow
+animates it open while keeping its top and bottom aligned with the main card. It
+contains separate `Internal drives` and `Removable drives` sections and is driven
+entirely by the latest `lsblk` snapshot; no device names or mount paths are stored
+in configuration.
+
 - One-line-per-metric, no graphs in v1 (rates as text arrows ▲▼ + color: green=compaction/idle, amber=slow drain, red=real disk swap-out).
 - Click on any header collapses/expands that card; double-click grip hides to a small pill ("R18 z6 D0 V11.2") with tooltip — minimal desktop footprint mode.
 
 ## 6. Precautions ("do not break things")
 
 1. **No shell takeover**: launch as `quickshell -p <config path>` in a systemd *user* service; `plasmashell` untouched. Kill switch: `systemctl --user stop qs-system-monitor`.
-2. **Read-only I/O only.** A grep-guarded review rule in AGENTS.md: `Process.exec` commands must be from an allowlist (`nvidia-smi --query-*`, `pgrep`). No writes outside our own state file.
+2. **Read-only I/O only.** A grep-guarded review rule in AGENTS.md: `Process.exec` commands must be from an allowlist (`nvidia-smi --query-*`, the exact `lsblk -bP` storage query, `pgrep`). No writes outside our own state file.
 3. **Never block the render loop.** All reads async (`FileView` async load, `Process` non-blocking); parse failures produce `n/a`, not exceptions.
-4. **Poll budget**: 1 s meminfo (tiny file), 2 s swap/zram (tiny files), 5 s `nvidia-smi` (subprocess spawn; use one combined query per tick). Timers stop when window `visible: false`.
+4. **Poll budget**: 1 s meminfo (tiny file), 2 s swap/zram (tiny files), 5 s `nvidia-smi`, and 5 s `lsblk` snapshots (small read-only subprocesses). Timers stop when window `visible: false`.
 5. **Permission degradation**: if `mm_stat` unreadable (some setups restrict it), still show `/proc/swaps` zram Used with an "advanced stats unavailable" note. Never retry-storm.
 6. **Process races**: VRAM pid list re-validated against `/proc/<pid>/comm` every tick; dead pids dropped.
 7. **Layout edge cases**: mm_stat field-count variations; missing zram device (`/sys/block/zram*` glob empty → zram card renders "no zram configured"); multiple swap files (list each).
@@ -231,6 +257,14 @@ Vertical compact card stack (auto-width ~360 px):
 
 ### M4 — Polish
 - Collapse/pill modes, Config.qml knobs (intervals, thresholds, top-N), docs, screenshot, final README/AGENTS alignment.
+
+### M5 — Dynamic storage sidecar
+- `Storage.qml` discovers mounted filesystem devices with the allowlisted `lsblk`
+  query, reports free/used/total bytes, and separates internal from removable media.
+- `StorageSidecar.qml` opens from a right-hand tab with a width animation and shares
+  the main card's full height; its expanded state persists with the window state.
+- **Accept:** current mounted devices appear without configuration edits, USB media
+  is grouped under `Removable drives`, and a fresh query reflects mount/unmount changes.
 
 ## 8. Risks
 

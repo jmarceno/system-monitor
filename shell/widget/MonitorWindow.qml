@@ -38,12 +38,14 @@ Item {
         property int posY: 24
         property bool pinned: false
         property bool collapsed: false
+        property bool storageExpanded: false
         property string screenName: ""
 
         onPosXChanged: saveTimer.restart()
         onPosYChanged: saveTimer.restart()
         onPinnedChanged: saveTimer.restart()
         onCollapsedChanged: saveTimer.restart()
+        onStorageExpandedChanged: saveTimer.restart()
     }
 
     property var winHandle: null
@@ -68,6 +70,8 @@ Item {
                     windowState.pinned = s.pinned;
                 if (typeof s.collapsed === "boolean")
                     windowState.collapsed = s.collapsed;
+                if (typeof s.storageExpanded === "boolean")
+                    windowState.storageExpanded = s.storageExpanded;
                 if (typeof s.screenName === "string")
                     windowState.screenName = s.screenName;
             } catch (e) {
@@ -99,6 +103,7 @@ Item {
             posY: windowState.posY,
             pinned: windowState.pinned,
             collapsed: windowState.collapsed,
+            storageExpanded: windowState.storageExpanded,
             screenName: ctrl.winHandle && ctrl.winHandle.screen ? ctrl.winHandle.screen.name : windowState.screenName
         }));
     }
@@ -234,50 +239,73 @@ Item {
             aboveWindows: windowState.pinned
             color: "transparent"
 
-            implicitWidth: windowState.collapsed ? Config.collapsedWidth : Config.windowWidth
+            implicitWidth: windowState.collapsed ? Config.collapsedWidth : expandedLayout.implicitWidth + 16
             implicitHeight: windowState.collapsed
                 ? collapsedPill.implicitHeight + 12
-                : contentCol.implicitHeight + 16
+                : expandedLayout.implicitHeight + 16
 
             margins.left: windowState.posX
             margins.top: windowState.posY
 
             onWidthChanged: ctrl._clampToScreen()
 
-            // Full view
-            Rectangle {
-                id: fullCard
+            // Full view. The sidecar is part of the same layer-shell surface,
+            // so it shares the monitor's exact top and bottom edges.
+            Item {
+                id: expandedLayout
                 visible: !windowState.collapsed
-                anchors.fill: parent
-                radius: 14
-                color: Theme.windowBg
-                border.width: 1
-                border.color: Theme.windowBorder
+                x: 8
+                y: 8
+                width: parent.width - 16
+                height: parent.height - 16
+                implicitWidth: mainCard.width + layoutSpacing + storageSidecar.width
+                implicitHeight: mainCard.implicitHeight
 
-                Column {
-                    id: contentCol
-                    anchors.fill: parent
-                    anchors.margins: 8
-                    spacing: 8
+                readonly property int layoutSpacing: 8
 
-                    HeaderBar {
-                        width: parent.width
-                        win: win
-                        // Use an unambiguous outer id. `persist: persist`
-                        // resolves to HeaderBar.persist inside a dynamically
-                        // created Component and leaves it undefined.
-                        persist: windowState
-                        onCollapseToggled: windowState.collapsed = true
-                        onPinToggled: windowState.pinned = !windowState.pinned
-                        onCloseRequested: Qt.quit()
-                        onDragFinished: (mouseX, mouseY) => ctrl._handleDrop(win, mouseX, mouseY)
+                Rectangle {
+                    id: mainCard
+                    width: Config.windowWidth
+                    implicitHeight: contentCol.implicitHeight + 16
+                    height: parent.height
+                    radius: 14
+                    color: Theme.windowBg
+                    border.width: 1
+                    border.color: Theme.windowBorder
+
+                    Column {
+                        id: contentCol
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        spacing: 8
+
+                        HeaderBar {
+                            width: parent.width
+                            win: win
+                            // Use an unambiguous outer id. `persist: persist`
+                            // resolves to HeaderBar.persist inside a dynamically
+                            // created Component and leaves it undefined.
+                            persist: windowState
+                            onCollapseToggled: windowState.collapsed = true
+                            onPinToggled: windowState.pinned = !windowState.pinned
+                            onCloseRequested: Qt.quit()
+                            onDragFinished: (mouseX, mouseY) => ctrl._handleDrop(win, mouseX, mouseY)
+                        }
+
+                        TopStrip { width: parent.width }
+                        MemoryCard { width: parent.width }
+                        SwapAttributionCard { width: parent.width }
+                        ZramCard { width: parent.width }
+                        VramCard { width: parent.width }
                     }
+                }
 
-                    TopStrip { width: parent.width }
-                    MemoryCard { width: parent.width }
-                    SwapAttributionCard { width: parent.width }
-                    ZramCard { width: parent.width }
-                    VramCard { width: parent.width }
+                StorageSidecar {
+                    id: storageSidecar
+                    x: mainCard.width + expandedLayout.layoutSpacing
+                    height: parent.height
+                    expanded: windowState.storageExpanded
+                    onToggleRequested: windowState.storageExpanded = !windowState.storageExpanded
                 }
             }
 
