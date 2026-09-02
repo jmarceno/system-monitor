@@ -288,14 +288,31 @@ function parsePressureSome(text) {
     return -1;
 }
 
+// ---- hwmon / temperatures --------------------------------------------------
+
+// CPU package sensors we accept (AMD/Intel). Skip nvme/gpu/acpi junk.
+function isCpuHwmonName(name) {
+    return /^(k10temp|coretemp|zenpower|cpu_thermal)$/.test(name || "");
+}
+
+// sysfs temp*_input millidegree C -> Celsius. Missing/zero -> NaN.
+function parseTempMilli(text) {
+    const milli = toNum((text || "").trim());
+    return milli > 0 ? milli / 1000 : NaN;
+}
+
 // ---- nvidia-smi ------------------------------------------------------------
 
-// "11213, 12288" -> [usedMiB, totalMiB]
+// "11213, 12288" or "11213, 12288, 48" -> [usedMiB, totalMiB, tempC]
+// tempC is NaN when the temperature field is absent.
 function parseNvidiaGpu(text) {
     if (!text)
-        return [0, 0];
+        return [0, 0, NaN];
     const parts = text.trim().split(",");
-    return [toNum(parts[0]), toNum(parts[1])];
+    const temp = parts.length >= 3 && String(parts[2]).trim() !== ""
+        ? toNum(parts[2])
+        : NaN;
+    return [toNum(parts[0]), toNum(parts[1]), temp];
 }
 
 // CSV lines "pid, used_memory, /full/path process args" ->

@@ -32,6 +32,7 @@ Rectangle {
                 value: Cpu.busyPct
                 ringColor: Theme.accentCyan
                 sub: Format.fmtMHz(Cpu.mhz)
+                tempC: Cpu.tempC
             }
 
             RingGauge {
@@ -40,6 +41,7 @@ Rectangle {
                 value: Vram.usedPct
                 ringColor: Theme.accentAmber
                 sub: Vram.available ? Format.fmtKB(Vram.gpuUsedMiB * 1024) + " / " + Format.fmtKB(Vram.gpuTotalMiB * 1024) : "n/a"
+                tempC: Vram.tempC
             }
         }
 

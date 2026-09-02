@@ -106,9 +106,17 @@ check("cpu total > idle", total > cpu[3]);
 const mhz = Parse.parseCpuMHz(readFileSync("/proc/cpuinfo", "utf8"));
 check("cpu MHz > 0", mhz > 0, `got ${mhz}`);
 
+// --- hwmon / temperature ---
+check("cpu hwmon name k10temp", Parse.isCpuHwmonName("k10temp"));
+check("cpu hwmon rejects nvme", !Parse.isCpuHwmonName("nvme"));
+check("temp milli → °C", Parse.parseTempMilli("50500") === 50.5, `got ${Parse.parseTempMilli("50500")}`);
+check("temp milli empty → NaN", Number.isNaN(Parse.parseTempMilli("")));
+
 // --- synthetic nvidia-smi ---
 const [used, totalMiB] = Parse.parseNvidiaGpu("11213, 12288");
 check("nvidia gpu query", used === 11213 && totalMiB === 12288);
+const [usedT, totalT, tempC] = Parse.parseNvidiaGpu("11213, 12288, 48");
+check("nvidia gpu temp °C", usedT === 11213 && totalT === 12288 && tempC === 48, `got ${tempC}`);
 
 const apps = Parse.parseNvidiaApps(
     "1163, 25, /usr/bin/kwin_wayland\n" +

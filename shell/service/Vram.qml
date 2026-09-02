@@ -15,6 +15,7 @@ Singleton {
 
     property real gpuUsedMiB: 0
     property real gpuTotalMiB: 0
+    property real tempC: NaN        // GPU die °C from nvidia-smi; NaN when unavailable
     readonly property real usedPct: gpuTotalMiB > 0 ? 100 * gpuUsedMiB / gpuTotalMiB : 0
     readonly property bool available: gpuTotalMiB > 0
 
@@ -27,7 +28,7 @@ Singleton {
 
     readonly property bool running: !SystemSnapshot.compactMode
 
-    readonly property var gpuCommand: ["nvidia-smi", "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"]
+    readonly property var gpuCommand: ["nvidia-smi", "--query-gpu=memory.used,memory.total,temperature.gpu", "--format=csv,noheader,nounits"]
     readonly property var appsCommand: ["nvidia-smi", "--query-compute-apps=pid,used_memory,process_name", "--format=csv,noheader,nounits"]
 
     function _parseGpu(text) {
@@ -36,6 +37,7 @@ Singleton {
             root.gpuUsedMiB = v[0];
             root.gpuTotalMiB = v[1];
         }
+        root.tempC = isFinite(v[2]) && v[2] > 0 ? v[2] : NaN;
     }
 
     function _parseApps(text) {

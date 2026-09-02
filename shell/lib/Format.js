@@ -45,3 +45,10 @@ function fmtMHz(mhz) {
         return (mhz / 1000).toFixed(1) + " GHz";
     return Math.round(mhz) + " MHz";
 }
+
+// Celsius only (no Fahrenheit).
+function fmtTempC(c) {
+    if (!isFinite(c) || c <= 0)
+        return "n/a";
+    return Math.round(c) + "°C";
+}

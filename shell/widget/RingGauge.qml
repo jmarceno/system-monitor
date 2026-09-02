@@ -10,6 +10,8 @@ Item {
     property color ringColor: Theme.accentCyan
     property string label: ""
     property string sub: ""
+    // Optional Celsius reading drawn inside the ring. NaN / <=0 hides it.
+    property real tempC: NaN
 
     implicitWidth: ringSize + 86
     implicitHeight: ringSize
@@ -48,6 +50,14 @@ Item {
         }
 
         Component.onCompleted: requestPaint()
+    }
+
+    Text {
+        anchors.centerIn: ring
+        text: isFinite(root.tempC) && root.tempC > 0 ? Format.fmtTempC(root.tempC) : ""
+        color: Theme.textMuted
+        font.pixelSize: Theme.fontSizeSm
+        font.bold: true
     }
 
     Column {
