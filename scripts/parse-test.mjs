@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 
 // Parse.js is a QML .pragma library; strip the pragma for node.
 const src = readFileSync(new URL("../shell/lib/Parse.js", import.meta.url), "utf8")
@@ -44,8 +44,11 @@ const diskArea = areas.find(a => !a.isZram);
 check("zram area found", !!zramArea);
 check("disk swap area found", !!diskArea);
 check("zram usedKB > 0", zramArea && zramArea.usedKB > 0);
-check("priorities parsed", zramArea.priority === 100 && diskArea.priority === 10,
-    `${zramArea.priority}/${diskArea.priority}`);
+// Swap priorities are install-specific: zram stays 100, the disk file was
+// prio 10 at /home/swapfile (Manjaro) and is prio 0 at /swap/swapfile
+// (Omarchy 4.0.4, 2026-09-19). Assert shape, not a fixed value.
+check("priorities parsed", zramArea.priority === 100 && Number.isFinite(diskArea.priority),
+    `${zramArea.priority}/${diskArea.priority} (${diskArea.name})`);
 
 // --- vmstat ---
 const vm = Parse.pairMap(readFileSync("/proc/vmstat", "utf8"));
@@ -118,6 +121,20 @@ check("nvidia gpu query", used === 11213 && totalMiB === 12288);
 const [usedT, totalT, tempC] = Parse.parseNvidiaGpu("11213, 12288, 48");
 check("nvidia gpu temp °C", usedT === 11213 && totalT === 12288 && tempC === 48, `got ${tempC}`);
 
+const gpus = Parse.parseNvidiaGpus(
+    "112, 12288, 38, 0, NVIDIA GeForce RTX 3060\n" +
+    "705, 12288, 45, 1, NVIDIA GeForce RTX 3060\n");
+check("nvidia gpus count", gpus.length === 2, `got ${gpus.length}`);
+check("nvidia gpu 0", gpus[0] && gpus[0].index === 0 && gpus[0].usedMiB === 112 && gpus[0].totalMiB === 12288,
+    JSON.stringify(gpus[0]));
+check("nvidia gpu 1", gpus[1] && gpus[1].index === 1 && gpus[1].usedMiB === 705 && gpus[1].tempC === 45,
+    JSON.stringify(gpus[1]));
+check("nvidia gpu short name", gpus[0].shortName === "RTX 3060", gpus[0] && gpus[0].shortName);
+const oneGpu = Parse.parseNvidiaGpus("11213, 12288, 48");
+check("nvidia gpus legacy line", oneGpu.length === 1 && oneGpu[0].index === 0 && oneGpu[0].usedMiB === 11213,
+    JSON.stringify(oneGpu[0]));
+check("nvidia gpus empty", Parse.parseNvidiaGpus("").length === 0);
+
 const apps = Parse.parseNvidiaApps(
     "1163, 25, /usr/bin/kwin_wayland\n" +
     "37034, 4516, /opt/opencode_beta.appimage\n" +
@@ -126,6 +143,11 @@ check("nvidia apps count", apps.length === 3, `got ${apps.length}`);
 check("nvidia app basename", apps[0].name === "kwin_wayland" && apps[1].name === "opencode_beta.appimage",
     JSON.stringify(apps.map(a => a.name)));
 check("nvidia app args stripped", apps[2].name === "llama-cli", apps[2].name);
+
+// --- ai-spend parsers (python collector, no network) ---
+const collectPy = fileURLToPath(new URL("../shell/lib/ai-spend-collect.py", import.meta.url));
+const aiSpend = execFileSync("python3", [collectPy, "--self-test"], { encoding: "utf8" });
+check("ai-spend self-test", aiSpend.includes("All ai-spend parser checks passed."), aiSpend);
 
 if (failures > 0) {
     console.error(`\n${failures} check(s) FAILED`);

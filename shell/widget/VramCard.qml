@@ -3,7 +3,7 @@ import ".."
 import "../lib/Format.js" as Format
 import "../service"
 
-// NVIDIA VRAM card: total usage + top consumers (read-only nvidia-smi).
+// NVIDIA VRAM card: combined usage, one bar per GPU, heaviest consumer.
 Card {
     id: root
 
@@ -36,15 +36,76 @@ Card {
         font.pixelSize: Theme.fontSizeSm
     }
 
-    Bar {
-        visible: Vram.available
-        value: Vram.usedPct
-        fillColor: Theme.accentAmber
+    Repeater {
+        model: Vram.gpus
+
+        delegate: Column {
+            id: gpuRow
+            required property var modelData
+            width: parent.width
+            spacing: 3
+            visible: Vram.available
+
+            Item {
+                width: parent.width
+                height: 16
+
+                Row {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 8
+
+                    Text {
+                        text: "GPU " + gpuRow.modelData.index
+                        color: Theme.text
+                        font.pixelSize: Theme.fontSizeMd
+                    }
+                    Text {
+                        visible: gpuRow.modelData.shortName.length > 0
+                        text: "•  " + gpuRow.modelData.shortName
+                        color: Theme.textFaint
+                        font.pixelSize: Theme.fontSizeSm
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    Text {
+                        visible: isFinite(gpuRow.modelData.tempC) && gpuRow.modelData.tempC > 0
+                        text: Format.fmtTempC(gpuRow.modelData.tempC)
+                        color: Theme.textMuted
+                        font.pixelSize: Theme.fontSizeSm
+                        font.bold: true
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
+
+                Row {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 6
+
+                    Text {
+                        text: Format.fmtKB(gpuRow.modelData.usedMiB * 1024) + " / " + Format.fmtKB(gpuRow.modelData.totalMiB * 1024)
+                        color: Theme.text
+                        font.pixelSize: Theme.fontSizeSm
+                        font.bold: true
+                    }
+                    Text {
+                        text: "(" + Format.fmtPct(gpuRow.modelData.usedPct) + ")"
+                        color: Theme.textFaint
+                        font.pixelSize: Theme.fontSizeSm
+                    }
+                }
+            }
+
+            Bar {
+                value: gpuRow.modelData.usedPct
+                fillColor: Theme.accentAmber
+            }
+        }
     }
 
     Text {
         visible: Vram.available
-        text: "Top processes by VRAM (nvidia-smi)"
+        text: "Top process by VRAM"
         color: Theme.textMuted
         font.pixelSize: Theme.fontSizeSm
     }

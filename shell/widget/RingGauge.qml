@@ -12,6 +12,19 @@ Item {
     property string sub: ""
     // Optional Celsius reading drawn inside the ring. NaN / <=0 hides it.
     property real tempC: NaN
+    // Optional list of °C values (one per GPU). When non-empty, stacked in
+    // GPU order and used instead of tempC so dual-GPU boxes are not merged.
+    property var temps: []
+
+    readonly property var _tempModel: {
+        const src = (root.temps && root.temps.length > 0)
+            ? root.temps
+            : ((isFinite(root.tempC) && root.tempC > 0) ? [root.tempC] : []);
+        const out = [];
+        for (let i = 0; i < src.length; i++)
+            out.push({ tempC: src[i] });
+        return out;
+    }
 
     implicitWidth: ringSize + 86
     implicitHeight: ringSize
@@ -52,12 +65,23 @@ Item {
         Component.onCompleted: requestPaint()
     }
 
-    Text {
+    Column {
         anchors.centerIn: ring
-        text: isFinite(root.tempC) && root.tempC > 0 ? Format.fmtTempC(root.tempC) : ""
-        color: Theme.textMuted
-        font.pixelSize: Theme.fontSizeSm
-        font.bold: true
+        spacing: 0
+
+        Repeater {
+            model: root._tempModel
+
+            Text {
+                required property var modelData
+                width: ring.width - 16
+                horizontalAlignment: Text.AlignHCenter
+                text: isFinite(modelData.tempC) && modelData.tempC > 0 ? Format.fmtTempC(modelData.tempC) : ""
+                color: Theme.textMuted
+                font.pixelSize: Theme.fontSizeSm
+                font.bold: true
+            }
+        }
     }
 
     Column {

@@ -17,10 +17,11 @@ ShellRoot {
         property var e: StorageIo.samples
         property var f: Vram.procs
         property var g: Storage.volumes
+        property var h: AiSpend.providers
     }
 
     Timer {
-        interval: 7000
+        interval: 12000
         running: true
         repeat: false
         onTriggered: {
@@ -61,10 +62,16 @@ ShellRoot {
 
             console.log("=== Vram ===");
             console.log("avail:", Vram.available, f.fmtKB(Vram.gpuUsedMiB * 1024), "/", f.fmtKB(Vram.gpuTotalMiB * 1024), "(" + f.fmtPct(Vram.usedPct) + ")");
+            console.log("gpus:", JSON.stringify(Vram.gpus));
+            console.log("temps:", JSON.stringify(Vram.temps));
             console.log("procs:", JSON.stringify(Vram.procs));
 
             console.log("=== Storage ===");
             console.log("ready:", Storage.ready, "volumes:", JSON.stringify(Storage.volumes));
+
+            console.log("=== AiSpend ===");
+            console.log("ready:", AiSpend.ready, "ok:", AiSpend.okCount, "failed:", AiSpend.queryFailed);
+            console.log("providers:", JSON.stringify(AiSpend.providers));
 
             console.log("=== ALL CHECKS DONE ===");
             Qt.quit();

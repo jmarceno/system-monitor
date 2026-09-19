@@ -52,3 +52,12 @@ function fmtTempC(c) {
         return "n/a";
     return Math.round(c) + "°C";
 }
+
+// USD for the AI-spend sidecar. The collector already formats headlines;
+// this is for any leftover numeric bindings.
+function fmtUsd(n) {
+    if (!isFinite(n))
+        return "n/a";
+    const sign = n < 0 ? "-" : "";
+    return sign + "$" + Math.abs(n).toFixed(2);
+}

@@ -17,19 +17,23 @@ Singleton {
     property int cpuinfoIntervalMs: 2000
     property int staticIntervalMs: 10000 // zswap/writeback status
     property int storageIntervalMs: 5000 // mounted devices / free space
+    property int aiSpendIntervalMs: 300000 // billing APIs: 5 min
+    property int aiSpendCollapsedIntervalMs: 900000 // 15 min when the widget is a pill
 
     // Swap attribution: rate above this (kB/s) is flagged as real disk
     // swap-out pressure. 0 = any nonzero disk swap-out flags.
     property real diskSwapAlertKBps: 0
 
     // VRAM card: how many top consumers to list.
-    property int topProcesses: 5
+    property int topProcesses: 1
 
     // Window geometry (logical px).
     property int windowWidth: 440
     property int collapsedWidth: 300
     property int storageCollapsedWidth: 42
     property int storageExpandedWidth: 254
+    property int aiSpendCollapsedWidth: 42
+    property int aiSpendExpandedWidth: 280
 
     // zram devices to track (missing ones render "no zram configured").
     property var zramDevices: ["zram0"]

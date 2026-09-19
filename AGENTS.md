@@ -4,14 +4,17 @@ Guidelines for AI agents and contributors working in this repository.
 
 ## Project Scope & Objectives
 
-`system-monitor` is a **Quickshell (QML) desktop widget for KDE Plasma on Wayland**
-showing four things existing monitors get wrong or conflate:
+`system-monitor` is a **Quickshell (QML) desktop widget for Wayland**
+(Hyprland on this host; KDE Plasma compatible)
+showing the memory/GPU picture existing monitors get wrong, plus an AI-spend sidecar:
 
 1. **RAM used / available** (honest, cache-separated usage)
 2. **zram stats** (logical stored → compressed → RAM held → ratio → savings)
 3. **Real disk swap stats** (per-device, with net-rate-of-change — "is anything actually
    being written to disk, or is zram just compacting in RAM?")
-4. **Top VRAM consumers** (total + per-process GPU memory list)
+4. **Top VRAM consumer** (combined total + the heaviest GPU-memory process)
+5. **AI spend sidecar** (Cursor / OpenCode / OpenRouter / DeepSeek / OpenAI / Codex / Meta — never merge
+   prepaid balance, plan quota %, and period spend into one fake total)
 
 The **flagship feature is swap attribution**: distinguishing healthy in-RAM zram
 compaction from real disk swap. Never merge these into one number.
@@ -26,16 +29,20 @@ before implementing anything. UI/UX decisions live there; don't redesign them si
    `plasmashell`, KWin config, or compositor settings.
 2. **Strictly read-only system access.** Only read `/proc/*`, `/sys/*` and run
    read-only CLI queries from the allowlist: `nvidia-smi --query-*`, `lsblk -bP
-   -o PATH,LABEL,FSTYPE,FSAVAIL,FSSIZE,FSUSED,MOUNTPOINTS,RM,TYPE,TRAN,PKNAME,KNAME`, `pgrep`.
+   -o PATH,LABEL,FSTYPE,FSAVAIL,FSSIZE,FSUSED,MOUNTPOINTS,RM,TYPE,TRAN,PKNAME,KNAME`,
+   `pgrep`, and `python3 -u shell/lib/ai-spend-collect.py` (the spend helper itself
+   may read Cursor's local `state.vscdb` / OpenCode `auth.json` and issue GET/POST
+   to the documented billing endpoints — never write those databases, never log
+   tokens).
    **Never write to `/sys`** — no `reset`, `compact`, `mem_limit`, no zram
    reconfiguration. The zram `sysfs` attrs are config, not data.
 3. **No root, no sudo, no privileged helpers.** Missing permissions ⇒ render "n/a"
    with a note; never block, retry-storm, or prompt.
 4. **Never block the QML render loop.** All I/O async (`FileView` async reload,
    `Process` non-blocking). Parse failures yield `n/a`, not exceptions.
-5. **Bounded polling.** Defaults: meminfo 1 s, swap/zram 2 s, `nvidia-smi` 5 s.
-   Timers pause when the widget is hidden. All intervals configurable in
-   `shell/Config.qml`.
+5. **Bounded polling.** Defaults: meminfo 1 s, swap/zram 2 s, `nvidia-smi` 5 s,
+   AI spend 5 min (15 min while collapsed). Timers pause when the widget is hidden.
+   All intervals configurable in `shell/Config.qml`.
 6. **Kill switch must always work**: `systemctl --user stop qs-system-monitor`
    fully removes the widget with zero residue.
 
@@ -49,17 +56,25 @@ before implementing anything. UI/UX decisions live there; don't redesign them si
 - Parsers must **tolerate layout drift**: variable field counts, missing files,
   missing devices. Unknown fields ignored; missing data → `n/a`.
 - Position/prefs persistence via `PersistentProperties` (survives quickshell reloads).
-- The current machine is NVIDIA (RTX 3060): `nvidia-smi` is the VRAM primary path;
-  AMD fdinfo fallback stays in the design but is secondary. Validate pids against
-  `/proc/<pid>/comm` every tick to guard PID-reuse races.
+- The current machine is NVIDIA (two RTX 3060s): `nvidia-smi` is the VRAM
+  primary path and lists one row per GPU. The ring gauge is combined used/total;
+  the NVIDIA VRAM card draws one bar per GPU. AMD fdinfo fallback stays in the
+  design but is secondary. Validate pids against `/proc/<pid>/comm` every tick to
+  guard PID-reuse races.
 - Storage volumes come from the read-only `lsblk -bP` query. Filter to mounted
   filesystems, group them into internal/removable sections, and never add a
   mount path or device name to `Config.qml`.
+- AI spend keys never live in `Config.qml` or the repo. Optional file:
+  `$XDG_CONFIG_HOME/qs-system-monitor/ai-spend.json` (see
+  `packaging/ai-spend.example.json`). Cursor/OpenCode/OpenRouter/Codex also fall back to
+  credentials already on the machine.
 
-## Known Environment Facts (verified 2026-08, Manjaro, kernel 6.12)
+## Known Environment Facts (verified 2026-08 Manjaro; re-verified 2026-09-19 Omarchy)
 
-- Quickshell 0.3.0; KDE Plasma Wayland (KWin).
-- `/dev/zram0` priority 100 + `/home/swapfile` priority 10 (both swap areas present).
+- Quickshell 0.3.1 (was 0.3.0); Hyprland Wayland (was KDE Plasma Wayland/KWin).
+  Omarchy 4.0.4, kernel 7.2.5-3-omarchy.
+- `/dev/zram0` priority 100 + `/swap/swapfile` priority 0, 32 GB each
+  (was `/home/swapfile` priority 10 on Manjaro; both swap areas present).
 - zswap **disabled**; zram has no writeback backing device (`backing_dev: none`).
 - `/proc/vmstat` `pswpin/pswpout` count **all** swap I/O including zram — disk-only
   rate must subtract zram deltas (see `PLAN.md` §4.3 for the exact formula).
@@ -76,8 +91,10 @@ before implementing anything. UI/UX decisions live there; don't redesign them si
    - zram: `zramctl`, `cat /sys/block/zram0/mm_stat`
    - swap: `swapon --show`, `cat /proc/swaps`, `grep pswpin /proc/vmstat`
    - VRAM: `nvidia-smi`
+   - AI spend: `python3 shell/lib/ai-spend-collect.py` (prints JSON; never log it if debugging keys)
 5. Automated/parser checks: `node scripts/parse-test.mjs` (validates `shell/lib/Parse.js`
-   against live `/proc`/`/sys` — run after touching any parser).
+   against live `/proc`/`/sys` plus `ai-spend-collect.py --self-test` — run after
+   touching any parser).
 6. Headless collector check (prints live values, no window):
    `quickshell -p shell/collector-check.qml`.
 7. Commit only verified-working states; test the systemd service after any change

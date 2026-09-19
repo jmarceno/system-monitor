@@ -13,11 +13,17 @@ import "../lib/Format.js" as Format
 Singleton {
     id: root
 
+    // Combined across every nvidia-smi GPU. The ring gauge uses these.
     property real gpuUsedMiB: 0
     property real gpuTotalMiB: 0
-    property real tempC: NaN        // GPU die °C from nvidia-smi; NaN when unavailable
+    property real tempC: NaN        // hottest GPU die °C (fallback); the gauge uses gpus[].tempC
     readonly property real usedPct: gpuTotalMiB > 0 ? 100 * gpuUsedMiB / gpuTotalMiB : 0
     readonly property bool available: gpuTotalMiB > 0
+
+    // [{index, name, shortName, usedMiB, totalMiB, tempC, usedPct}] one entry per GPU.
+    property var gpus: []
+    // One die °C per GPU, same order as gpus. The ring gauge stacks these.
+    property var temps: []
 
     // [{pid, mib, name}] sorted desc by mib, top Config.topProcesses.
     // name is deduped ("llama-cli", "llama-cli #2").
@@ -28,16 +34,45 @@ Singleton {
 
     readonly property bool running: !SystemSnapshot.compactMode
 
-    readonly property var gpuCommand: ["nvidia-smi", "--query-gpu=memory.used,memory.total,temperature.gpu", "--format=csv,noheader,nounits"]
+    property string _gpuOutput: ""
+    property string _appsOutput: ""
+
+    readonly property var gpuCommand: ["nvidia-smi", "--query-gpu=memory.used,memory.total,temperature.gpu,index,name", "--format=csv,noheader,nounits"]
     readonly property var appsCommand: ["nvidia-smi", "--query-compute-apps=pid,used_memory,process_name", "--format=csv,noheader,nounits"]
 
     function _parseGpu(text) {
-        const v = Parse.parseNvidiaGpu(text);
-        if (v[1] > 0) {
-            root.gpuUsedMiB = v[0];
-            root.gpuTotalMiB = v[1];
+        const list = Parse.parseNvidiaGpus(text);
+        if (list.length === 0)
+            return;
+        let used = 0;
+        let total = 0;
+        let maxTemp = NaN;
+        const gpus = [];
+        const temps = [];
+        for (let i = 0; i < list.length; i++) {
+            const g = list[i];
+            used += g.usedMiB;
+            total += g.totalMiB;
+            const t = g.tempC;
+            const tempC = isFinite(t) && t > 0 ? t : NaN;
+            if (isFinite(tempC) && (!isFinite(maxTemp) || tempC > maxTemp))
+                maxTemp = tempC;
+            temps.push(tempC);
+            gpus.push({
+                index: g.index,
+                name: g.name,
+                shortName: g.shortName,
+                usedMiB: g.usedMiB,
+                totalMiB: g.totalMiB,
+                tempC: tempC,
+                usedPct: g.totalMiB > 0 ? 100 * g.usedMiB / g.totalMiB : 0
+            });
         }
-        root.tempC = isFinite(v[2]) && v[2] > 0 ? v[2] : NaN;
+        root.gpus = gpus;
+        root.temps = temps;
+        root.gpuUsedMiB = used;
+        root.gpuTotalMiB = total;
+        root.tempC = maxTemp;
     }
 
     function _parseApps(text) {
@@ -120,10 +155,15 @@ Singleton {
     Process {
         id: gpuProc
         stdout: SplitParser {
-            onRead: data => root._parseGpu(data)
+            onRead: data => root._gpuOutput += data + "\n"
         }
+        onStarted: root._gpuOutput = ""
         onExited: (exitCode, exitStatus) => {
-            if (exitCode !== 0)
+            const output = root._gpuOutput;
+            root._gpuOutput = "";
+            if (exitCode === 0)
+                root._parseGpu(output);
+            else
                 root._fail();
         }
     }
@@ -131,10 +171,15 @@ Singleton {
     Process {
         id: appsProc
         stdout: SplitParser {
-            onRead: data => root._parseApps(data)
+            onRead: data => root._appsOutput += data + "\n"
         }
+        onStarted: root._appsOutput = ""
         onExited: (exitCode, exitStatus) => {
-            if (exitCode !== 0)
+            const output = root._appsOutput;
+            root._appsOutput = "";
+            if (exitCode === 0)
+                root._parseApps(output);
+            else
                 root._fail();
         }
     }

@@ -303,8 +303,16 @@ function parseTempMilli(text) {
 
 // ---- nvidia-smi ------------------------------------------------------------
 
-// "11213, 12288" or "11213, 12288, 48" -> [usedMiB, totalMiB, tempC]
-// tempC is NaN when the temperature field is absent.
+// "NVIDIA GeForce RTX 3060" -> "RTX 3060". Unknown names are returned as-is.
+function shortGpuName(name) {
+    return String(name || "")
+        .replace(/^NVIDIA\s+/i, "")
+        .replace(/^GeForce\s+/i, "")
+        .trim();
+}
+
+// One CSV line: "used, total" or "used, total, temp[, index, name...]".
+// -> [usedMiB, totalMiB, tempC]. tempC is NaN when the temperature field is absent.
 function parseNvidiaGpu(text) {
     if (!text)
         return [0, 0, NaN];
@@ -313,6 +321,37 @@ function parseNvidiaGpu(text) {
         ? toNum(parts[2])
         : NaN;
     return [toNum(parts[0]), toNum(parts[1]), temp];
+}
+
+// One nvidia-smi --query-gpu line per GPU (used,total[,temp[,index,name]]).
+// -> [{index, name, shortName, usedMiB, totalMiB, tempC}]
+function parseNvidiaGpus(text) {
+    const out = [];
+    if (!text)
+        return out;
+    const lines = String(text).split("\n");
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line)
+            continue;
+        const v = parseNvidiaGpu(line);
+        if (!(v[1] > 0))
+            continue;
+        const parts = line.split(",");
+        const index = parts.length >= 4 && String(parts[3]).trim() !== ""
+            ? toNum(parts[3])
+            : out.length;
+        const name = parts.length >= 5 ? parts.slice(4).join(",").trim() : "";
+        out.push({
+            index: index,
+            name: name,
+            shortName: shortGpuName(name),
+            usedMiB: v[0],
+            totalMiB: v[1],
+            tempC: v[2]
+        });
+    }
+    return out;
 }
 
 // CSV lines "pid, used_memory, /full/path process args" ->

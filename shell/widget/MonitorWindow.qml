@@ -39,6 +39,7 @@ Item {
         property bool pinned: false
         property bool collapsed: false
         property bool storageExpanded: false
+        property bool aiSpendExpanded: false
         property string screenName: ""
 
         onPosXChanged: saveTimer.restart()
@@ -46,6 +47,7 @@ Item {
         onPinnedChanged: saveTimer.restart()
         onCollapsedChanged: saveTimer.restart()
         onStorageExpandedChanged: saveTimer.restart()
+        onAiSpendExpandedChanged: saveTimer.restart()
     }
 
     property var winHandle: null
@@ -72,6 +74,8 @@ Item {
                     windowState.collapsed = s.collapsed;
                 if (typeof s.storageExpanded === "boolean")
                     windowState.storageExpanded = s.storageExpanded;
+                if (typeof s.aiSpendExpanded === "boolean")
+                    windowState.aiSpendExpanded = s.aiSpendExpanded;
                 if (typeof s.screenName === "string")
                     windowState.screenName = s.screenName;
             } catch (e) {
@@ -104,6 +108,7 @@ Item {
             pinned: windowState.pinned,
             collapsed: windowState.collapsed,
             storageExpanded: windowState.storageExpanded,
+            aiSpendExpanded: windowState.aiSpendExpanded,
             screenName: ctrl.winHandle && ctrl.winHandle.screen ? ctrl.winHandle.screen.name : windowState.screenName
         }));
     }
@@ -258,7 +263,7 @@ Item {
                 y: 8
                 width: parent.width - 16
                 height: parent.height - 16
-                implicitWidth: mainCard.width + layoutSpacing + storageSidecar.width
+                implicitWidth: mainCard.width + layoutSpacing + storageSidecar.width + layoutSpacing + aiSpendSidecar.width
                 implicitHeight: mainCard.implicitHeight
 
                 readonly property int layoutSpacing: 8
@@ -306,6 +311,14 @@ Item {
                     height: parent.height
                     expanded: windowState.storageExpanded
                     onToggleRequested: windowState.storageExpanded = !windowState.storageExpanded
+                }
+
+                AiSpendSidecar {
+                    id: aiSpendSidecar
+                    x: storageSidecar.x + storageSidecar.width + expandedLayout.layoutSpacing
+                    height: parent.height
+                    expanded: windowState.aiSpendExpanded
+                    onToggleRequested: windowState.aiSpendExpanded = !windowState.aiSpendExpanded
                 }
             }
 

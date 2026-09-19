@@ -7,12 +7,12 @@ Target environment (verified on this machine):
 
 | Fact | Value |
 |---|---|
-| Desktop | KDE Plasma, Wayland (KWin) |
-| Quickshell | 0.3.0 (`/usr/bin/quickshell`), installed via Arch package |
-| Kernel | 6.12.104-1-MANJARO |
-| GPU | NVIDIA RTX 3060 (`nvidia-smi` available, per-process VRAM query works) |
+| Desktop | Hyprland Wayland (was KDE Plasma Wayland/KWin); Omarchy 4.0.4 |
+| Quickshell | 0.3.1 (`/usr/bin/quickshell`), installed via Arch package (was 0.3.0) |
+| Kernel | 7.2.5-3-omarchy (was 6.12.104-1-MANJARO) |
+| GPU | two NVIDIA RTX 3060 (`nvidia-smi` lists one row per GPU; gauge sums them) |
 | zram | `/dev/zram0`, priority 100, world-readable `mm_stat`/`stat`/`io_stat` |
-| Disk swap | `/home/swapfile` (32 GB, priority 10) |
+| Disk swap | `/swap/swapfile` (32 GB, priority 0; was `/home/swapfile` prio 10) |
 | zswap | disabled (`/proc/meminfo` → `Zswapped: 0 kB`) |
 | zram writeback | not configured (`backing_dev: none`) |
 
@@ -39,9 +39,15 @@ A **single floating desktop widget** (not a bar, not a panel, not a shell replac
 1. **RAM used / available** with an honest breakdown (used, available, cache/reclaimable, SwapCached).
 2. **zram stats**: logical data stored, compressed size, compression ratio, actual RAM consumed, savings.
 3. **Real disk swap stats**: per-device size/used, *net rate of change* per device (is anything actually being written to the NVMe?), plus system-wide swap-in/out throughput attributed to zram vs disk.
-4. **Top VRAM consumers**: total VRAM used + top N processes by GPU memory with process names.
+4. **Top VRAM consumer**: combined VRAM used + the single heaviest process by GPU memory.
 5. **Mounted storage sidecar**: free/used/total space for the same mounted internal
    and removable filesystem devices users see in Dolphin.
+6. **AI spend sidecar** (right of storage): Cursor plan meters (Cursor models /
+   Other models %), OpenCode Go quota %, OpenRouter remaining credits, DeepSeek
+   remaining credits (granted + topped-up split), OpenAI
+   month-to-date cost when an admin key is configured. Meta stays `n/a` until
+   it exposes an account-wide API. Do not sum mixed units (dollars vs quota %)
+   into one total.
 
 **Explicitly out of scope (for now):** CPU/network graphs, theming beyond a sane dark card look,
 audio, battery, per-core stats, replacing any Plasma component.
@@ -49,7 +55,9 @@ audio, battery, per-core stats, replacing any Plasma component.
 **Safety contract (non-negotiable):**
 
 - Run as an *ordinary user process alongside* `plasmashell`. Never replace it, never disable it.
-- **Read-only**: only read `/proc`, `/sys`, and run read-only CLI queries (`nvidia-smi` query flags). Never write to `/sys` (no `reset`, `compact`, `mem_limit`, no zram reconfiguration).
+- **Read-only**: only read `/proc`, `/sys`, run read-only CLI queries (`nvidia-smi`
+  query flags, `lsblk`, the AI-spend python helper). Never write to `/sys` (no `reset`,
+  `compact`, `mem_limit`, no zram reconfiguration).
 - **No root required.** If a data source is unreadable, degrade gracefully to "n/a" with a visible note — never block, never crash, never spawn sudo prompts.
 - Bounded polling: total widget CPU budget ~<1% idle; all timers pausable; full kill switch = stop the service.
 
@@ -66,6 +74,7 @@ shell/
 │   ├── Vram.qml             # nvidia-smi queries (+ fdinfo fallback path for AMD machines)
 │   ├── Storage.qml          # lsblk -bP → mounted device/free-space snapshots
 │   ├── StorageIo.qml        # /proc/diskstats → per-mounted-device I/O rates/history
+│   ├── AiSpend.qml          # python helper → Cursor / OpenCode / OpenRouter / DeepSeek / OpenAI / Meta
 │   └── SystemSnapshot.qml   # Singleton aggregating all collectors into one reactive state
 ├── widget/
 │   ├── MonitorWindow.qml    # FloatingWindow, drag handling, persistence
@@ -74,7 +83,10 @@ shell/
 │   ├── SwapCard.qml
 │   ├── VramCard.qml
 │   ├── StorageSidecar.qml   # expandable full-height mounted-device list
+│   ├── AiSpendSidecar.qml   # expandable full-height AI billing list (after storage)
 │   └── lib/Format.qml       # bytes/kB→human readable, rates, pct bars
+├── lib/
+│   └── ai-spend-collect.py  # read-only billing snapshot (HTTP + local creds)
 └── assets/                  # icons if needed
 ```
 
@@ -153,7 +165,11 @@ UI verdict states (this is what the user actually needs):
 
 Primary (NVIDIA, this machine): `Process.exec` of two read-only queries every **5 s**:
 
-- `nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits`
+- `nvidia-smi --query-gpu=memory.used,memory.total,temperature.gpu,index,name --format=csv,noheader,nounits`
+  → one CSV line per GPU. The ring gauge and card header use the **sum** of
+  `memory.used` / `memory.total` across all lines; the VRAM card draws **one bar
+  per GPU**. The ring stacks one die temp per GPU (same order as the bars);
+  they are never merged into a single hottest reading.
 - `nvidia-smi --query-compute-apps=pid,used_memory,process_name --format=csv,noheader,nounits`
   → for each pid: read `/proc/<pid>/comm` to get the short friendly name; **validate pid is alive and comm matches the reported basename** (guards against PID reuse races; drop stale entries instead of mislabeling).
 
@@ -220,10 +236,10 @@ Vertical compact card stack (auto-width ~360 px):
 │ /home/swapfile 185 MB of 32 GB   │
 │ disk swap-out: 0 kB/s (idle ✔)   │
 ├ VRAM ────────────────────────────┤
-│ 11.2 / 12.3 GB                   │
-│ opencode_beta   4516 MB          │
-│ llama-cli       3564 MB          │
-│ llama-cli       2478 MB          │
+│ 817 MB / 24.6 GB  (combined)      │
+│ GPU 0 · RTX 3060 38°C  112 MB / 12.3 GB│
+│ GPU 1 · RTX 3060 45°C  695 MB / 12.3 GB│
+│ kwin_wayland      23 MB               │
 └──────────────────────────────────┘
 ```
 
@@ -233,6 +249,11 @@ contains separate `Internal drives` and `Removable drives` sections and is drive
 entirely by the latest `lsblk` snapshot; no device names or mount paths are stored
 in configuration.
 
+Immediately to the right of storage is a second tab (`$`) for AI spend. Same height
+animation, independent expanded state. Each provider is its own card; remaining
+credits, plan quota %, and period spend stay separate numbers. Keys are never in
+`Config.qml` — see `packaging/ai-spend.example.json`.
+
 - Swap attribution remains one-line-per-metric with text rates and verdict colors;
   each storage entry adds its own read/write rates and a compact I/O sparkline below
   the mountpoint.
@@ -241,11 +262,11 @@ in configuration.
 ## 6. Precautions ("do not break things")
 
 1. **No shell takeover**: launch as `quickshell -p <config path>` in a systemd *user* service; `plasmashell` untouched. Kill switch: `systemctl --user stop qs-system-monitor`.
-2. **Read-only I/O only.** A grep-guarded review rule in AGENTS.md: `Process.exec` commands must be from an allowlist (`nvidia-smi --query-*`, the exact `lsblk -bP` storage query, `pgrep`). No writes outside our own state file.
+2. **Read-only I/O only.** A grep-guarded review rule in AGENTS.md: `Process.exec` commands must be from an allowlist (`nvidia-smi --query-*`, the exact `lsblk -bP` storage query, `pgrep`, `python3 -u` of `shell/lib/ai-spend-collect.py`). No writes outside our own state file. The spend helper must not write Cursor/`opencode` credential stores.
 3. **Never block the render loop.** All reads async (`FileView` async load, `Process` non-blocking); parse failures produce `n/a`, not exceptions.
 4. **Poll budget**: 1 s meminfo (tiny file), 2 s swap/zram and per-device diskstats,
-   5 s `nvidia-smi`, and 5 s `lsblk` snapshots (small read-only subprocesses).
-   Timers stop when window `visible: false`.
+   5 s `nvidia-smi`, 5 s `lsblk` snapshots, and 5 min AI-spend (15 min while the
+   widget is a pill). Timers stop when window `visible: false`.
 5. **Permission degradation**: if `mm_stat` unreadable (some setups restrict it), still show `/proc/swaps` zram Used with an "advanced stats unavailable" note. Never retry-storm.
 6. **Process races**: VRAM pid list re-validated against `/proc/<pid>/comm` every tick; dead pids dropped.
 7. **Layout edge cases**: mm_stat field-count variations; missing zram device (`/sys/block/zram*` glob empty → zram card renders "no zram configured"); multiple swap files (list each).
@@ -269,7 +290,7 @@ in configuration.
 - **Accept:** while running only a browser + editor, card shows `zram-only / idle`; stress test (`stress-ng --vm`) or an intentional `chrt` memory hog shows `disk-pressure` only when the NVMe is truly being written (verify against `/proc/diskstats` manually once).
 
 ### M3 — VRAM card
-- nvidia-smi queries + pid validation + top-N list; graceful hide on missing binary.
+- nvidia-smi queries + pid validation + the single heaviest process; graceful hide on missing binary.
 - **Accept:** launching/stopping a CUDA process updates the list within one tick; desktop apps (kwin, brave gpu-proc) appear with friendly names.
 
 ### M4 — Polish
@@ -282,6 +303,20 @@ in configuration.
   the main card's full height; its expanded state persists with the window state.
 - **Accept:** current mounted devices appear without configuration edits, USB media
   is grouped under `Removable drives`, and a fresh query reflects mount/unmount changes.
+
+### M6 — AI spend sidecar
+- `AiSpend.qml` runs `python3 -u shell/lib/ai-spend-collect.py` every 5 min and
+  publishes a provider snapshot. `AiSpendSidecar.qml` sits immediately right of
+  storage. Cursor uses the local session (undocumented dashboard RPC); OpenRouter
+  uses the official credits API; DeepSeek uses the official `GET /user/balance`
+  (remaining credits with granted + topped-up split, USD preferred); OpenCode Go
+  uses `/zen/go/v1/usage`; OpenAI uses
+  the official organization costs API when an admin key is present; Codex uses
+  `GET chatgpt.com/backend-api/wham/usage` via `~/.codex/auth.json`; Meta renders
+  `n/a`.
+- **Accept:** Cursor / OpenCode Go / OpenRouter / DeepSeek / Codex show live figures from local
+  logins; OpenAI shows month-to-date when `openaiAdminKey` is in the secrets file;
+  no tokens appear in logs or `Config.qml`.
 
 ## 8. Risks
 
@@ -354,3 +389,25 @@ The mockup added three things that were "out of scope" in §2. They are implemen
   (3.6x ≈ `zramctl`), and a live GPU process appeared correctly with a friendly name.
 - systemd service boots, journal clean, steady state ~1.6% CPU / 0.6% memory (300 MB RSS
   including Qt runtime).
+
+### 9.5 AI spend sidecar (M6)
+
+- Collector process: `python3 -u` + `Quickshell.shellPath("lib/ai-spend-collect.py")`.
+  Stdout is one JSON snapshot; the QML singleton never sees tokens.
+- Cursor **Pro meters** are `autoPercentUsed` (Cursor models) and `apiPercentUsed`
+  (Other models). Do not treat `includedSpend`/`totalSpend` cents or `displayMessage`
+  as billed usage — they disagree with the Plan & Usage page. OpenRouter
+  `remaining = total_credits - total_usage`. DeepSeek `GET /user/balance`
+  reports per-currency `total_balance` (decimal strings) with `granted_balance` /
+  `topped_up_balance` split; USD is preferred when several currencies are present
+  and there is no quota total to percent against.
+  OpenCode Go percents are **used** (matching the dashboard). OpenAI sums `results[].amount.value`
+  for the current UTC month. Codex 5-hour / weekly percents come from
+  `chatgpt.com/backend-api/wham/usage` (ChatGPT OAuth in `~/.codex/auth.json`).
+  Cloudflare returns 1010 unless the helper sends a User-Agent.
+- Cursor and Codex access-token refresh (on 401) is in-memory only — we never write
+  `state.vscdb` or `~/.codex/auth.json`.
+- Optional secrets file: `$XDG_CONFIG_HOME/qs-system-monitor/ai-spend.json` for the
+  OpenAI organization admin key. OpenRouter/OpenCode fall back to
+  `~/.local/share/opencode/auth.json`; Cursor and Codex fall back to their signed-in
+  app databases.

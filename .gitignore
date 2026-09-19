@@ -20,6 +20,7 @@ build/
 !.env.example
 *.key
 *.pem
+ai-spend.json
 
 # Logs
 *.log
@@ -35,3 +36,7 @@ logs/
 # Temp
 tmp/
 temp/
+
+# Python
+__pycache__/
+*.py[cod]

@@ -17,4 +17,5 @@ Singleton {
     readonly property var storageIo: StorageIo
     readonly property var vram: Vram
     readonly property var storage: Storage
+    readonly property var aiSpend: AiSpend
 }
