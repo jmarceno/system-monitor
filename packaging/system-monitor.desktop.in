@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=System Monitor
+GenericName=System Monitor
+Comment=RAM, zram, disk swap and VRAM
+Exec=@EXEC@
+Icon=utilities-system-monitor
+Terminal=false
+StartupNotify=false
+StartupWMClass=system-monitor
+Categories=System;Monitor;
+Keywords=RAM;VRAM;zram;swap;GPU;memory;
+SingleMainWindow=true

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Launch the floating system monitor with the project venv.
+set -euo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "${SOURCE}" ]]; do
+    DIR="$(cd "$(dirname "${SOURCE}")" && pwd)"
+    SOURCE="$(readlink "${SOURCE}")"
+    [[ "${SOURCE}" != /* ]] && SOURCE="${DIR}/${SOURCE}"
+done
+REPO_DIR="$(cd "$(dirname "${SOURCE}")/.." && pwd)"
+PYTHON="${REPO_DIR}/.venv/bin/python"
+
+if [[ ! -x "${PYTHON}" ]]; then
+    echo "error: ${PYTHON} not found. Run ${REPO_DIR}/scripts/install.sh first." >&2
+    exit 1
+fi
+
+export PYTHONPATH="${REPO_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
+cd "${REPO_DIR}"
+exec "${PYTHON}" -m sysmon "$@"

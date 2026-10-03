@@ -4,7 +4,7 @@ Guidelines for AI agents and contributors working in this repository.
 
 ## Project Scope & Objectives
 
-`system-monitor` is a **Quickshell (QML) desktop widget for Wayland**
+`system-monitor` is a **Python / Qt (PySide6) desktop application for Wayland**
 (Hyprland on this host; KDE Plasma compatible)
 showing the memory/GPU picture existing monitors get wrong, plus an AI-spend sidecar:
 
@@ -24,13 +24,14 @@ before implementing anything. UI/UX decisions live there; don't redesign them si
 
 ## Non-Negotiable Safety Rules
 
-1. **Run alongside Plasma, never as a shell replacement.** Launch via
-   `quickshell -p ./shell` (manual) or a systemd *user* service. Never touch
-   `plasmashell`, KWin config, or compositor settings.
+1. **Run alongside the desktop, never as a shell replacement.** Launch via
+   `python -m sysmon` (manual) or a systemd *user* service. Never touch
+   `plasmashell`, Hyprland config (except the optional windowrule snippet),
+   KWin config, or compositor settings as a required install step.
 2. **Strictly read-only system access.** Only read `/proc/*`, `/sys/*` and run
    read-only CLI queries from the allowlist: `nvidia-smi --query-*`, `lsblk -bP
    -o PATH,LABEL,FSTYPE,FSAVAIL,FSSIZE,FSUSED,MOUNTPOINTS,RM,TYPE,TRAN,PKNAME,KNAME`,
-   `pgrep`, and `python3 -u shell/lib/ai-spend-collect.py` (the spend helper itself
+   and the in-process AI-spend helper (`sysmon/lib/ai_spend_collect.py` — it
    may read Cursor's local `state.vscdb` / OpenCode `auth.json` and issue GET/POST
    to the documented billing endpoints — never write those databases, never log
    tokens).
@@ -38,24 +39,25 @@ before implementing anything. UI/UX decisions live there; don't redesign them si
    reconfiguration. The zram `sysfs` attrs are config, not data.
 3. **No root, no sudo, no privileged helpers.** Missing permissions ⇒ render "n/a"
    with a note; never block, retry-storm, or prompt.
-4. **Never block the QML render loop.** All I/O async (`FileView` async reload,
-   `Process` non-blocking). Parse failures yield `n/a`, not exceptions.
+4. **Never block the Qt event loop.** `/proc` and `/sys` reads are tiny; `nvidia-smi`
+   and `lsblk` run via `QProcess`; AI spend runs on a worker `QThread`. Parse
+   failures yield `n/a`, not exceptions.
 5. **Bounded polling.** Defaults: meminfo 1 s, swap/zram 2 s, `nvidia-smi` 5 s,
-   AI spend 5 min (15 min while collapsed). Timers pause when the widget is hidden.
-   All intervals configurable in `shell/Config.qml`.
-6. **Kill switch must always work**: `systemctl --user stop qs-system-monitor`
-   fully removes the widget with zero residue.
+   AI spend 5 min. All intervals configurable in `sysmon/config.py`.
+6. **Kill switch must always work**: `systemctl --user stop system-monitor`
+   fully removes the window with zero residue.
 
 ## Architecture Rules
 
-- Directory layout is fixed by `PLAN.md` §3: `shell/{shell.qml,Config.qml,service/,widget/}`.
-- **Collectors are `Singleton` QML files** in `service/` — each owns its data source
-  and parsing. UI (`widget/`) never reads `/proc` or `/sys` directly; it renders
+- Directory layout is fixed by `PLAN.md` §3: `sysmon/{config.py,snapshot.py,collectors/,ui/,lib/}`.
+- **Collectors are `QObject` classes** in `collectors/` — each owns its data source
+  and parsing. UI (`ui/`) never reads `/proc` or `/sys` directly; it renders
   snapshot state only.
-- Parsing lives next to its source (`Zram.qml` owns `mm_stat` layout knowledge).
+- Parsing lives in `sysmon/parse.py` (side-effect free, unit-tested) plus the
+  collector that owns derived math (`SwapDiskCollector` owns attribution).
 - Parsers must **tolerate layout drift**: variable field counts, missing files,
   missing devices. Unknown fields ignored; missing data → `n/a`.
-- Position/prefs persistence via `PersistentProperties` (survives quickshell reloads).
+- Position/prefs persistence via `~/.local/state/system-monitor/window-state.json`.
 - The current machine is NVIDIA (two RTX 3060s): `nvidia-smi` is the VRAM
   primary path and lists one row per GPU. The ring gauge is combined used/total;
   the NVIDIA VRAM card draws one bar per GPU. AMD fdinfo fallback stays in the
@@ -63,15 +65,15 @@ before implementing anything. UI/UX decisions live there; don't redesign them si
   guard PID-reuse races.
 - Storage volumes come from the read-only `lsblk -bP` query. Filter to mounted
   filesystems, group them into internal/removable sections, and never add a
-  mount path or device name to `Config.qml`.
-- AI spend keys never live in `Config.qml` or the repo. Optional file:
+  mount path or device name to `sysmon/config.py`.
+- AI spend keys never live in `sysmon/config.py` or the repo. Optional file:
   `$XDG_CONFIG_HOME/qs-system-monitor/ai-spend.json` (see
   `packaging/ai-spend.example.json`). Cursor/OpenCode/OpenRouter/Codex also fall back to
   credentials already on the machine.
 
 ## Known Environment Facts (verified 2026-08 Manjaro; re-verified 2026-09-19 Omarchy)
 
-- Quickshell 0.3.1 (was 0.3.0); Hyprland Wayland (was KDE Plasma Wayland/KWin).
+- Python 3.12+ / PySide6 6.x; Hyprland Wayland (was KDE Plasma Wayland/KWin).
   Omarchy 4.0.4, kernel 7.2.5-3-omarchy.
 - `/dev/zram0` priority 100 + `/swap/swapfile` priority 0, 32 GB each
   (was `/home/swapfile` priority 10 on Manjaro; both swap areas present).
@@ -85,31 +87,27 @@ before implementing anything. UI/UX decisions live there; don't redesign them si
 
 1. Branch from `master`: `feat/<name>`, `fix/<name>`, `docs/<name>`.
 2. Conventional commits (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`).
-3. Run the widget live while developing: `quickshell -p ./shell` (live-reloads on save).
+3. Run the widget live while developing: `.venv/bin/python -m sysmon`.
 4. Verify numbers against ground truth before trusting a collector:
    - RAM: `free -h`, `cat /proc/meminfo`
    - zram: `zramctl`, `cat /sys/block/zram0/mm_stat`
    - swap: `swapon --show`, `cat /proc/swaps`, `grep pswpin /proc/vmstat`
    - VRAM: `nvidia-smi`
-   - AI spend: `python3 shell/lib/ai-spend-collect.py` (prints JSON; never log it if debugging keys)
-5. Automated/parser checks: `node scripts/parse-test.mjs` (validates `shell/lib/Parse.js`
-   against live `/proc`/`/sys` plus `ai-spend-collect.py --self-test` — run after
+   - AI spend: `python3 sysmon/lib/ai_spend_collect.py` (prints JSON; never log it if debugging keys)
+5. Automated/parser checks: `python3 scripts/parse-test.py` (validates `sysmon/parse.py`
+   against live `/proc`/`sys` plus `ai_spend_collect.py --self-test` — run after
    touching any parser).
 6. Headless collector check (prints live values, no window):
-   `quickshell -p shell/collector-check.qml`.
+   `.venv/bin/python -m sysmon --check`
 7. Commit only verified-working states; test the systemd service after any change
-   to launch code (`systemctl --user restart qs-system-monitor`).
+   to launch code (`systemctl --user restart system-monitor`).
 
-## QML / Quickshell Conventions
+## Python / Qt Conventions
 
-- Follow Quickshell 0.3.x API (installed docs: `quickshell.outfoxxed.me/docs/v0.3.0`).
-- Quickshell 0.3.0 gotchas (see `PLAN.md` §9.3 for details): `FileView.text` is a
-  **function** (`text()`), singletons instantiate **lazily** on first reference, imports
-  must not escape the config root, `PersistentProperties` persists only properties
-  declared inside it.
-- No hardcoded user paths or thresholds — all knobs in `shell/Config.qml`.
-- Idempotent collectors: a quickshell live-reload must not duplicate timers or
-  double-count state.
+- Target PySide6 (Qt 6). Do not introduce PyQt6 or Quickshell as a runtime.
+- No hardcoded user paths or thresholds — all knobs in `sysmon/config.py`.
+- Collectors must tolerate a Qt live-restart without duplicating timers
+  (one `QTimer` per collector, parented to the collector `QObject`).
 - Prefer clarity over cleverness; small focused components; document non-obvious math
   (especially §4.3 attribution) with comments citing the source files.
 

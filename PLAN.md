@@ -1,14 +1,15 @@
-# Implementation Plan — `system-monitor` (Quickshell widget for KDE Plasma)
+# Implementation Plan — `system-monitor` (Python / Qt desktop app for Wayland)
 
-> **Status: implemented (M0–M5).** The widget matches `mock/mockup.png` and runs as a
-> systemd user service. Deviations from this plan are documented in §9.
+> **Status: implemented (M0–M6) and ported from Quickshell to PySide6.**
+> The widget matches `mock/mockup.png` and runs as a systemd user service.
+> Deviations from this plan are documented in §9.
 
 Target environment (verified on this machine):
 
 | Fact | Value |
 |---|---|
 | Desktop | Hyprland Wayland (was KDE Plasma Wayland/KWin); Omarchy 4.0.4 |
-| Quickshell | 0.3.1 (`/usr/bin/quickshell`), installed via Arch package (was 0.3.0) |
+| Runtime | Python 3.12+ / PySide6 6.x (was Quickshell 0.3.1) |
 | Kernel | 7.2.5-3-omarchy (was 6.12.104-1-MANJARO) |
 | GPU | two NVIDIA RTX 3060 (`nvidia-smi` lists one row per GPU; gauge sums them) |
 | zram | `/dev/zram0`, priority 100, world-readable `mm_stat`/`stat`/`io_stat` |
@@ -34,7 +35,7 @@ workload/optimization decisions. Additionally:
 
 ## 2. Product scope
 
-A **single floating desktop widget** (not a bar, not a panel, not a shell replacement) that shows:
+A **single desktop application** (not a bar, not a shell widget, not a shell replacement) that shows:
 
 1. **RAM used / available** with an honest breakdown (used, available, cache/reclaimable, SwapCached).
 2. **zram stats**: logical data stored, compressed size, compression ratio, actual RAM consumed, savings.
@@ -54,7 +55,7 @@ audio, battery, per-core stats, replacing any Plasma component.
 
 **Safety contract (non-negotiable):**
 
-- Run as an *ordinary user process alongside* `plasmashell`. Never replace it, never disable it.
+- Run as an *ordinary user process alongside* the desktop. Never replace the compositor.
 - **Read-only**: only read `/proc`, `/sys`, run read-only CLI queries (`nvidia-smi`
   query flags, `lsblk`, the AI-spend python helper). Never write to `/sys` (no `reset`,
   `compact`, `mem_limit`, no zram reconfiguration).
@@ -64,45 +65,43 @@ audio, battery, per-core stats, replacing any Plasma component.
 ## 3. Architecture
 
 ```
-shell/
-├── shell.qml                # ShellRoot: instantiates the single MonitorWindow
-├── Config.qml               # user-tunable constants (intervals, thresholds, toggles)
-├── service/
-│   ├── MemInfo.qml          # /proc/meminfo  → RAM + SwapCached + zswap fields
-│   ├── Zram.qml             # /sys/block/zram0/{mm_stat,stat,io_stat} + /proc/swaps zram row
-│   ├── SwapDisk.qml         # /proc/swaps (disk rows) + /proc/vmstat rates + attribution
-│   ├── Vram.qml             # nvidia-smi queries (+ fdinfo fallback path for AMD machines)
-│   ├── Storage.qml          # lsblk -bP → mounted device/free-space snapshots
-│   ├── StorageIo.qml        # /proc/diskstats → per-mounted-device I/O rates/history
-│   ├── AiSpend.qml          # python helper → Cursor / OpenCode / OpenRouter / DeepSeek / OpenAI / Meta
-│   └── SystemSnapshot.qml   # Singleton aggregating all collectors into one reactive state
-├── widget/
-│   ├── MonitorWindow.qml    # FloatingWindow, drag handling, persistence
-│   ├── RamCard.qml
-│   ├── ZramCard.qml
-│   ├── SwapCard.qml
-│   ├── VramCard.qml
-│   ├── StorageSidecar.qml   # expandable full-height mounted-device list
-│   ├── AiSpendSidecar.qml   # expandable full-height AI billing list (after storage)
-│   └── lib/Format.qml       # bytes/kB→human readable, rates, pct bars
-├── lib/
-│   └── ai-spend-collect.py  # read-only billing snapshot (HTTP + local creds)
-└── assets/                  # icons if needed
+sysmon/
+├── __main__.py              # python -m sysmon  (window or --check)
+├── config.py                # user-tunable constants (intervals, thresholds, toggles)
+├── snapshot.py              # QObject aggregating all collectors
+├── parse.py                 # side-effect-free /proc /sys lsblk nvidia-smi parsers
+├── format.py                # bytes / rates / °C / USD
+├── collectors/
+│   ├── meminfo.py           # /proc/meminfo  → RAM + SwapCached + zswap fields
+│   ├── zram.py              # /sys/block/zram0/{mm_stat,stat} + /proc/swaps zram row
+│   ├── swap_disk.py         # /proc/swaps (disk rows) + /proc/vmstat rates + attribution
+│   ├── vram.py              # nvidia-smi queries (+ fdinfo fallback path for AMD machines)
+│   ├── storage.py           # lsblk -bP → mounted device/free-space snapshots
+│   ├── storage_io.py        # /proc/diskstats → per-mounted-device I/O rates/history
+│   ├── ai_spend.py          # python helper → Cursor / OpenCode / OpenRouter / DeepSeek / OpenAI / Meta
+│   └── cpu.py               # /proc/stat + cpuinfo MHz + hwmon °C
+├── ui/
+│   ├── window.py            # frameless QWidget, drag handling, persistence
+│   ├── cards.py
+│   ├── gauges.py
+│   └── sidecars.py
+└── lib/
+    └── ai_spend_collect.py  # read-only billing snapshot (HTTP + local creds)
 ```
 
 Design principles:
 
-- **Every collector is a `Singleton` QML file** exposing read-only properties (`ram`, `zram`, `swap`, `vram` objects). UI never touches `/proc` directly — only the snapshot state.
-- Parsing lives next to the source it parses (`Zram.qml` knows `mm_stat` field layout).
+- **Every collector is a `QObject`** exposing read-only properties (`mem`, `zram`, `swap`, `vram`). UI never touches `/proc` directly — only the snapshot state.
+- Parsing lives in `sysmon/parse.py`; derived attribution math lives in `SwapDiskCollector`.
 - UI is dumb: renders the snapshot state, no I/O.
-- Config is a single QML singleton so intervals/limits can be tuned in one place.
+- Config is a single dataclass so intervals/limits can be tuned in one place.
 
 ## 4. Data sources & formulas (the hard part — done carefully)
 
-### 4.1 RAM (`service/MemInfo.qml`)
+### 4.1 RAM (`collectors/meminfo.py`)
 
-Source: `/proc/meminfo` (kB fields). Poll every **1 s** via `Timer` + `FileView.reload()`
-(**not** `watchChanges` — procfs doesn't fire inotify reliably).
+Source: `/proc/meminfo` (kB fields). Poll every **1 s** via `QTimer`.
+(**not** inotify — procfs doesn't fire inotify reliably).
 
 Derived properties:
 
@@ -112,7 +111,7 @@ Derived properties:
 - `swapCached` = `SwapCached` (pages that left RAM but still have a swap copy — relevant to swap-in cost)
 - `zswapUsed` = `Zswap`, `zswapCompressed` = `Zswapped` (0 here, but read them so the widget stays correct if zswap is ever enabled)
 
-### 4.2 zram (`service/Zram.qml`)
+### 4.2 zram (`collectors/zram.py`)
 
 Sources:
 
@@ -130,7 +129,7 @@ Derived:
 - `ramSaved` = logicalStored − ramHeld
 - `hugePages` counts (regression signal when ratio degrades)
 
-### 4.3 Disk swap + attribution (`service/SwapDisk.qml`) — the core fix
+### 4.3 Disk swap + attribution (`collectors/swap_disk.py`) — the core fix
 
 Sources:
 
@@ -161,7 +160,7 @@ UI verdict states (this is what the user actually needs):
 - `draining`: values shrinking → "swap being read back"
 - `idle`: nothing changing
 
-### 4.4 VRAM consumers (`service/Vram.qml`)
+### 4.4 VRAM consumers (`collectors/vram.py`)
 
 Primary (NVIDIA, this machine): `Process.exec` of two read-only queries every **5 s**:
 
@@ -178,7 +177,7 @@ Fallback paths (keep for AMD/other machines / future portability):
 - Generic: scan `/proc/*/fdinfo/*` for `drm-` fields (`vram`, `gtt`, `dma-buf`) — works with amdgpu fdinfo.
 - Graceful degrade when `nvidia-smi` missing: hide card, log once.
 
-### 4.5 Mounted storage (`service/Storage.qml`)
+### 4.5 Mounted storage (`collectors/storage.py`)
 
 Source: the allowlisted read-only query:
 
@@ -194,7 +193,7 @@ rows are deduplicated by device path, and `/boot`/EFI implementation partitions
 are omitted from the Dolphin-style user storage list. Missing `lsblk` or an
 unreadable query produces an unavailable sidecar rather than a retry storm.
 
-### 4.6 Per-device storage I/O (`service/StorageIo.qml`)
+### 4.6 Per-device storage I/O (`collectors/storage_io.py`)
 
 Source: `/proc/diskstats`, polled every **2 s**. The collector matches each
 mounted volume's `KNAME` from `lsblk` to its own cumulative read/write sector
@@ -211,75 +210,66 @@ Nuance shown in UI: per-process sum ≠ GPU total (driver-reserved + graphics ov
 
 ### 5.1 Window model
 
-- `FloatingWindow` — a normal toplevel window. Works on KWin/Wayland today, movable anywhere, drag across monitors. Chosen over `PanelWindow` because the requirement is a **free-floating widget**, not an edge-anchored panel.
-- Frameless content card, small **drag strip** (grip handle) at the top: `MouseArea`/`DragHandler` that updates `window.x/y` while dragging, clamped to the current screen bounds.
-- Multi-screen: position clamped against `Quickshell.screens`; window keeps its screen assignment.
+- Ordinary resizable `QWidget` with the compositor's title bar, so it tiles and focuses like any other desktop application.
+- One client area. Sections share edges in a grid (`spacing` 0). There are no floating cards, side panels, or a collapsed pill.
+- Geometry is clamped to the current screen's available area. Lists scroll inside their cell so a short window cannot push a section off screen or collapse it to nothing.
 
 ### 5.2 Placement persistence
 
-- `PersistentProperties` stores `x`, `y`, `collapsed`, compact mode, interval overrides → survives reloads (and live-edit iteration), stored in Quickshell's state dir.
-- Optional helper: a KWin window-rule note in docs ("keep below others", "no focus stealing") so the widget feels like desktop furniture without us fighting the compositor.
+- `~/.local/state/system-monitor/window-state.json` stores `posX`, `posY`, `width`, `height`, and screen name. Older `collapsed` / `pinned` keys are ignored.
+- `packaging/hyprland-windowrule.conf` no longer forces float, pin, or noborder. Those rules made the Qt port keep behaving like the old Quickshell widget.
 
 ### 5.3 Layout
 
-Vertical compact card stack (auto-width ~360 px):
+One grid that fills the window:
 
 ```
-┌ RAM ─────────────────────────────┐
-│ ▕██████████░░░░░▏  18.2 / 31.3 GB │
-│ available 24.9 GB · cache 1.4 GB │
-├ zram ────────────────────────────┤
-│ 6.1 GB logical → 1.6 GB (3.9:1)  │
-│ RAM held 1.7 GB · saved 4.4 GB   │
-│ compaction ▲ 12 MB/s (in RAM ✔)  │
-├ Disk swap ───────────────────────┤
-│ /home/swapfile 185 MB of 32 GB   │
-│ disk swap-out: 0 kB/s (idle ✔)   │
-├ VRAM ────────────────────────────┤
-│ 817 MB / 24.6 GB  (combined)      │
-│ GPU 0 · RTX 3060 38°C  112 MB / 12.3 GB│
-│ GPU 1 · RTX 3060 45°C  695 MB / 12.3 GB│
-│ kwin_wayland      23 MB               │
-└──────────────────────────────────┘
+┌ CPU ┬ GPU VRAM ┬ RAM ┬ Swap (disk only, 0 when zram is the only device) ┐
+├ Memory ┴──────────┼ zram (orig / compr / mem / compaction rate) ─────────┤
+├ Disk swap ────────┼ VRAM (one bar per GPU, top process) ─────────────────┤
+├ Storage (scroll) ─┼ AI spend (scroll) ───────────────────────────────────┤
+└───────────────────┴──────────────────────────────────────────────────────┘
 ```
 
-The storage sidecar is a narrow tab on the right when closed. Clicking its arrow
-animates it open while keeping its top and bottom aligned with the main card. It
-contains separate `Internal drives` and `Removable drives` sections and is driven
-entirely by the latest `lsblk` snapshot; no device names or mount paths are stored
-in configuration.
+The top row is four equal gauges (CPU, GPU VRAM, RAM, disk swap) at content
+height. Below that, two columns size independently: memory and disk swap stay
+as tall as their content, and storage takes the remaining height. zram and
+VRAM do the same on the right, with AI spend taking the rest. Storage and AI
+spend scroll inside their cells. Storage contains separate `Internal drives` and `Removable
+drives` sections and is driven entirely by the latest `lsblk` snapshot; no device
+names or mount paths are stored in configuration.
 
-Immediately to the right of storage is a second tab (`$`) for AI spend. Same height
-animation, independent expanded state. Each provider is its own card; remaining
-credits, plan quota %, and period spend stay separate numbers. Keys are never in
-`Config.qml` — see `packaging/ai-spend.example.json`.
+AI spend lists one card per provider. Remaining credits, plan quota %, and period
+spend stay separate numbers. Keys are never in `sysmon/config.py` — see
+`packaging/ai-spend.example.json`.
 
-- Swap attribution remains one-line-per-metric with text rates and verdict colors;
-  each storage entry adds its own read/write rates and a compact I/O sparkline below
+- The swap gauge and the disk-swap section count **disk swap only**. zram is never
+  included. With no disk swap device the gauge stays at 0. zram compaction rate
+  stays on the zram section.
+- Each storage entry adds its own read/write rates and a compact I/O sparkline below
   the mountpoint.
-- Click on any header collapses/expands that card; double-click grip hides to a small pill ("R18 z6 D0 V11.2") with tooltip — minimal desktop footprint mode.
 
 ## 6. Precautions ("do not break things")
 
-1. **No shell takeover**: launch as `quickshell -p <config path>` in a systemd *user* service; `plasmashell` untouched. Kill switch: `systemctl --user stop qs-system-monitor`.
-2. **Read-only I/O only.** A grep-guarded review rule in AGENTS.md: `Process.exec` commands must be from an allowlist (`nvidia-smi --query-*`, the exact `lsblk -bP` storage query, `pgrep`, `python3 -u` of `shell/lib/ai-spend-collect.py`). No writes outside our own state file. The spend helper must not write Cursor/`opencode` credential stores.
-3. **Never block the render loop.** All reads async (`FileView` async load, `Process` non-blocking); parse failures produce `n/a`, not exceptions.
+1. **No shell takeover**: launch as `python -m sysmon` in a systemd *user* service; compositor untouched. Kill switch: `systemctl --user stop system-monitor`.
+2. **Read-only I/O only.** A grep-guarded review rule in AGENTS.md: spawned commands must be from an allowlist (`nvidia-smi --query-*`, the exact `lsblk -bP` storage query). No writes outside our own state file. The spend helper must not write Cursor/`opencode` credential stores.
+3. **Never block the Qt event loop.** `/proc` reads are tiny; `nvidia-smi`/`lsblk` use `QProcess`; AI spend uses a worker `QThread`. Parse failures produce `n/a`, not exceptions.
 4. **Poll budget**: 1 s meminfo (tiny file), 2 s swap/zram and per-device diskstats,
-   5 s `nvidia-smi`, 5 s `lsblk` snapshots, and 5 min AI-spend (15 min while the
-   widget is a pill). Timers stop when window `visible: false`.
+   5 s `nvidia-smi`, 5 s `lsblk` snapshots, and 5 min AI-spend. Timers stop when
+   the window is not visible.
 5. **Permission degradation**: if `mm_stat` unreadable (some setups restrict it), still show `/proc/swaps` zram Used with an "advanced stats unavailable" note. Never retry-storm.
 6. **Process races**: VRAM pid list re-validated against `/proc/<pid>/comm` every tick; dead pids dropped.
 7. **Layout edge cases**: mm_stat field-count variations; missing zram device (`/sys/block/zram*` glob empty → zram card renders "no zram configured"); multiple swap files (list each).
-8. **Reload safety**: all mutable state behind Singletons + `PersistentProperties`; quickshell live-reload must not duplicate timers (idempotent collectors).
+8. **Restart safety**: collectors parent their `QTimer`s; a process restart must not leave a stray window (kill switch stops the user unit).
 9. **Memory of the monitor itself**: keep snapshots tiny; per-device I/O histories
    are capped at 40 points and are discarded when a device disappears.
 
 ## 7. Milestones
 
 ### M0 — Skeleton boots (no data)
-- `shell.qml` + `MonitorWindow.qml` floating card renders; drag strip moves it; position persists across reload.
-- systemd user unit installs; widget appears after login; `systemctl --user stop` kills it cleanly; Plasma unaffected.
-- **Accept:** drag to any position → reload quickshell → position retained; `journalctl --user -u qs-system-monitor` clean.
+- `sysmon/ui/window.py` floating card renders; drag strip moves it; position persists across restart.
+- systemd user unit installs; widget appears after login; `systemctl --user stop` kills it cleanly.
+- **Accept:** drag to any position → restart → position retained; `journalctl --user -u system-monitor` clean.
 
 ### M1 — RAM + zram cards
 - MemInfo + Zram collectors with the formulas above; cards render live values that match `free -h` and `zramctl` outputs within rounding.
@@ -294,20 +284,19 @@ credits, plan quota %, and period spend stay separate numbers. Keys are never in
 - **Accept:** launching/stopping a CUDA process updates the list within one tick; desktop apps (kwin, brave gpu-proc) appear with friendly names.
 
 ### M4 — Polish
-- Collapse/pill modes, Config.qml knobs (intervals, thresholds, top-N), docs, screenshot, final README/AGENTS alignment.
+- Collapse/pill modes, `sysmon/config.py` knobs (intervals, thresholds, top-N), docs, screenshot, final README/AGENTS alignment.
 
 ### M5 — Dynamic storage sidecar
-- `Storage.qml` discovers mounted filesystem devices with the allowlisted `lsblk`
+- `StorageCollector` discovers mounted filesystem devices with the allowlisted `lsblk`
   query, reports free/used/total bytes, and separates internal from removable media.
-- `StorageSidecar.qml` opens from a right-hand tab with a width animation and shares
-  the main card's full height; its expanded state persists with the window state.
+- `StorageSidecar` is an always-open column to the right of the main card, same height.
 - **Accept:** current mounted devices appear without configuration edits, USB media
   is grouped under `Removable drives`, and a fresh query reflects mount/unmount changes.
 
 ### M6 — AI spend sidecar
-- `AiSpend.qml` runs `python3 -u shell/lib/ai-spend-collect.py` every 5 min and
-  publishes a provider snapshot. `AiSpendSidecar.qml` sits immediately right of
-  storage. Cursor uses the local session (undocumented dashboard RPC); OpenRouter
+- `AiSpendCollector` runs `sysmon/lib/ai_spend_collect.py` every 5 min on a worker
+  thread and publishes a provider snapshot. `AiSpendSidecar` is the always-open column
+  to the right of storage. Cursor uses the local session (undocumented dashboard RPC); OpenRouter
   uses the official credits API; DeepSeek uses the official `GET /user/balance`
   (remaining credits with granted + topped-up split, USD preferred); OpenCode Go
   uses `/zen/go/v1/usage`; OpenAI uses
@@ -316,84 +305,72 @@ credits, plan quota %, and period spend stay separate numbers. Keys are never in
   `n/a`.
 - **Accept:** Cursor / OpenCode Go / OpenRouter / DeepSeek / Codex show live figures from local
   logins; OpenAI shows month-to-date when `openaiAdminKey` is in the secrets file;
-  no tokens appear in logs or `Config.qml`.
+  no tokens appear in logs or `sysmon/config.py`.
 
 ## 8. Risks
 
 | Risk | Mitigation |
 |---|---|
-| KWin Wayland restricts arbitrary positioning | Positioning generally honored for toplevels on KWin; if a future compositor forbids it, fall back to `PanelWindow` edge anchoring mode (kept as a config flag). |
-| `nvidia-smi` spawn cost every 5 s | Single combined query; increase interval in Config; consider caching and only re-spawning when card visible. |
+| Qt / Wayland positioning | Normal toplevel. The compositor owns the frame. Saved geometry is clamped to the screen. |
+| `nvidia-smi` spawn cost every 5 s | Single combined query; increase interval in Config; only re-spawn when the previous `QProcess` has exited. |
 | vmstat attribution edge cases (e.g., future zram writeback) | `backing_dev` is read and, if non-`none`, attribution switches to `bd_stat` deltas; net-balance per-device view stays authoritative. |
 | Driver/kernel updates change file layouts | Parsers tolerate field-count drift; unknown fields ignored; missing → n/a. |
-| Quickshell API drift (0.3.x) | Pin docs to installed version; smoke-run on every update (scripted check in AGENTS.md). |
+| PySide6 / Qt Wayland drift | Pin docs to installed version; smoke-run `--check` on every update. |
 
 ## 9. Implementation notes & deviations (post-implementation record)
 
-### 9.1 Window model: PanelWindow (layer-shell), not FloatingWindow
+### 9.1 Window model: normal desktop window
 
-The mockup nominally says "FloatingWindow", but on Wayland a FloatingWindow:
-
-- cannot be programmatically positioned (no x/y API), so **position persistence is impossible**;
-- always floats above application windows and participates in focus — fighting the "desktop
-  furniture" requirement.
-
-The widget is therefore a `PanelWindow` (wlr layer-shell) with **left+top anchors and
-margin-based position**:
-
-- drag updates the persisted margins (`PersistentProperties`: posX/posY/pinned/collapsed);
-- unpinned it lives **below** application windows (true desktop widget); the pin (📌) button
-  toggles `aboveWindows` (top layer) — exactly what the mockup's pin means;
-- `exclusionMode: Ignore` so it never reserves screen space;
-- `focusable: false` so it never steals keyboard focus.
+The original Quickshell build was a layer-shell widget. The first PySide6 port
+kept that shape: a frameless, pinned, non-focusing card with separate side
+panels. That is gone. The process is a normal resizable window. The compositor
+draws the title bar and decides tiling. Position and size persist in
+`window-state.json`.
 
 ### 9.2 Scope additions from the mockup
 
 The mockup added three things that were "out of scope" in §2. They are implemented:
 
 - **Top summary** with larger ring gauges arranged as CPU/GPU then RAM/Swap —
-  `service/Cpu.qml`, `service/Vram.qml`, `service/MemInfo.qml` and `service/SwapDisk.qml`;
-  per-device disk **I/O** moved to the expandable storage sidecar via
-  `service/StorageIo.qml` (`/proc/diskstats` matched by `lsblk` `KNAME`);
-- **Header controls**: minimize (collapse to pill), pin (aboveWindows), close (quits the
-  instance — equivalent to the systemd kill switch);
-- **Footer chips** mirroring the safety posture.
+  `CpuCollector`, `VramCollector`, `MemInfoCollector` and `SwapDiskCollector`;
+  per-device disk **I/O** is in the storage section via
+  `StorageIoCollector` (`/proc/diskstats` matched by `lsblk` `KNAME`);
+- **Window chrome** is the compositor's. There is no in-app pin, drag strip, or pill.
 
-### 9.3 Quickshell 0.3.0 API gotchas (keep for future work)
+### 9.3 Python / Qt notes
 
-- `FileView.text` is a **function** in the public wrapper (`text()`), not a property; the
-  `onTextChanged` signal still fires on (re)load. Calling `text()` inside the handler is required.
-- Quickshell `Singleton`s are **lazily instantiated** on first reference. Collectors are only
-  instantiated early because the UI binds to them at startup. Test harnesses must reference
-  them via a binding (see the `Item` at the top of `shell/collector-check.qml`).
-- `PersistentProperties` persists properties declared *inside it* across reloads and restarts.
-- Quickshell forbids imports escaping the config root (`../..` from `shell/`), which is why
-  the collector check harness lives at `shell/collector-check.qml`.
-- Signal parameter injection (`onExited: exitCode => ...`) is deprecated; use arrow functions
-  with formal parameters.
-- Never mutate persisted window state from a pointer **release** handler: the write-back can
-  race the drag that just finished (observed as "the widget only drags once"). Same-screen
-  drops leave the drag's position untouched; only cross-screen hand-offs rewrite state.
-- Do not destroy and recreate a `PanelWindow` during a cross-screen hand-off. On this Qt/KWin
-  stack that can invalidate the shared scenegraph context and leave the replacement unable to
-  drag. Cache one surface per visited output and switch their visibility after pointer release.
-- Coalesce raw pointer motion to at most one layer-shell margin update per frame. Every margin
-  change requires a compositor reconfigure; applying every mouse event makes dragging visibly
-  redraw in small, laggy steps.
+- `nvidia-smi` and `lsblk` run through `QProcess` so the UI thread never waits on them.
+- AI spend runs `collect()` on a `QThread`; credentials never enter the UI layer.
+- Window state is a JSON file under `$XDG_STATE_HOME/system-monitor/` (debounced 400 ms).
+- Headless verification: `.venv/bin/python -m sysmon --check`.
 
-### 9.4 Verification performed (2026-08-31)
+### 9.4 Verification performed (2026-08-31, Quickshell era; re-run after the PySide6 port)
 
-- `scripts/parse-test.mjs` — 22 assertions against live `/proc`, `/sys` and synthetic
-  nvidia-smi output: all pass.
-- `shell/collector-check.qml` — live values match `free -h`, `/proc/swaps`, `mm_stat` ratio
-  (3.6x ≈ `zramctl`), and a live GPU process appeared correctly with a friendly name.
-- systemd service boots, journal clean, steady state ~1.6% CPU / 0.6% memory (300 MB RSS
-  including Qt runtime).
+- `scripts/parse-test.py` — assertions against live `/proc`, `/sys` and synthetic
+  nvidia-smi output.
+- `python -m sysmon --check` — live values match `free -h`, `/proc/swaps`, `mm_stat` ratio
+  (≈ `zramctl`), and a live GPU process appears with a friendly name.
 
-### 9.5 AI spend sidecar (M6)
+### 9.5 Single grid
 
-- Collector process: `python3 -u` + `Quickshell.shellPath("lib/ai-spend-collect.py")`.
-  Stdout is one JSON snapshot; the QML singleton never sees tokens.
+Storage and AI spend are cells in the same grid as memory, zram, disk swap, and
+VRAM. They are not separate panels and they are not stacked under a fixed-width
+card. Extra rows scroll inside the cell. Older `storageExpanded` /
+`aiSpendExpanded` keys in `window-state.json` are ignored.
+
+### 9.7 Disk swap is not zram
+
+`/proc/meminfo` `SwapTotal` and `/proc/swaps` include zram. The swap gauge,
+`SwapDiskCollector.used_pct`, and the disk-swap section do not. They use only
+rows whose filename is not `/dev/zram*`. On a machine whose only swap device is
+zram, disk size, disk used, and the gauge stay at 0. zram orig/compr/mem and
+the compaction rate stay on the zram section. If a disk swap file is added
+later, it shows up on its own and does not get added into the zram numbers.
+
+### 9.6 AI spend sidecar (M6)
+
+- Collector: `sysmon/lib/ai_spend_collect.py` imported in-process on a worker thread.
+  The UI only receives the JSON snapshot; it never sees tokens.
 - Cursor **Pro meters** are `autoPercentUsed` (Cursor models) and `apiPercentUsed`
   (Other models). Do not treat `includedSpend`/`totalSpend` cents or `displayMessage`
   as billed usage — they disagree with the Plan & Usage page. OpenRouter

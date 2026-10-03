@@ -38,5 +38,6 @@ tmp/
 temp/
 
 # Python
+.venv/
 __pycache__/
 *.py[cod]
