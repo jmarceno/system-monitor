@@ -58,11 +58,13 @@ before implementing anything. UI/UX decisions live there; don't redesign them si
 - Parsers must **tolerate layout drift**: variable field counts, missing files,
   missing devices. Unknown fields ignored; missing data → `n/a`.
 - Position/prefs persistence via `~/.local/state/system-monitor/window-state.json`.
-- The current machine is NVIDIA (two RTX 3060s): `nvidia-smi` is the VRAM
-  primary path and lists one row per GPU. The ring gauge is combined used/total;
-  the NVIDIA VRAM card draws one bar per GPU. AMD fdinfo fallback stays in the
-  design but is secondary. Validate pids against `/proc/<pid>/comm` every tick to
-  guard PID-reuse races.
+- The current machine is an AMD Radeon RX 550/560 (Baffin, `amdgpu`). VRAM
+  totals come from `/sys/class/drm/cardN/device/mem_info_vram_*`, the edge
+  temperature from the amdgpu hwmon, and per-process use from
+  `drm-resident-vram` in fdinfo. NVIDIA remains supported via `nvidia-smi`
+  when that binary is present; both vendors are shown together if both exist.
+  The ring gauge is combined used/total; the VRAM card draws one bar per GPU.
+  Validate pids against `/proc/<pid>/comm` every tick to guard PID-reuse races.
 - Storage volumes come from the read-only `lsblk -bP` query. Filter to mounted
   filesystems, group them into internal/removable sections, and never add a
   mount path or device name to `sysmon/config.py`.
@@ -92,7 +94,7 @@ before implementing anything. UI/UX decisions live there; don't redesign them si
    - RAM: `free -h`, `cat /proc/meminfo`
    - zram: `zramctl`, `cat /sys/block/zram0/mm_stat`
    - swap: `swapon --show`, `cat /proc/swaps`, `grep pswpin /proc/vmstat`
-   - VRAM: `nvidia-smi`
+   - VRAM: `cat /sys/class/drm/card0/device/mem_info_vram_used` (amdgpu) or `nvidia-smi`
    - AI spend: `python3 sysmon/lib/ai_spend_collect.py` (prints JSON; never log it if debugging keys)
 5. Automated/parser checks: `python3 scripts/parse-test.py` (validates `sysmon/parse.py`
    against live `/proc`/`sys` plus `ai_spend_collect.py --self-test` — run after

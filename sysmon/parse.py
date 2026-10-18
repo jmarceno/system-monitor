@@ -1,4 +1,4 @@
-"""Pure parsing helpers for /proc, /sys, lsblk and nvidia-smi output."""
+"""Pure parsing helpers for /proc, /sys, lsblk, nvidia-smi, and amdgpu fdinfo."""
 
 from __future__ import annotations
 
@@ -241,9 +241,107 @@ def parse_temp_milli(text: str | None) -> float:
 
 
 def short_gpu_name(name: str | None) -> str:
-    cleaned = re.sub(r"^NVIDIA\s+", "", str(name or ""), flags=re.I)
+    cleaned = str(name or "").strip()
+    cleaned = re.sub(r"^NVIDIA\s+", "", cleaned, flags=re.I)
     cleaned = re.sub(r"^GeForce\s+", "", cleaned, flags=re.I)
+    # pci.ids marketing names look like "Baffin [Radeon RX 550 640SP / RX 560/560X]".
+    bracket = re.search(r"\[([^\[\]]+)\]", cleaned)
+    if bracket:
+        cleaned = bracket.group(1).strip()
     return cleaned.strip()
+
+
+_DRM_SIZE = re.compile(r"^(\d+)\s*([KMGT]iB|B)?$", re.I)
+_DRM_SIZE_SCALE = {
+    "b": 1,
+    "kib": 1024,
+    "mib": 1024 ** 2,
+    "gib": 1024 ** 3,
+    "tib": 1024 ** 4,
+}
+
+
+def parse_drm_size_bytes(text: str | None) -> float:
+    """drm-usage-stats size. A missing unit is bytes; amdgpu prints KiB or MiB."""
+    if not text:
+        return 0.0
+    match = _DRM_SIZE.match(text.strip())
+    if not match:
+        return 0.0
+    scale = _DRM_SIZE_SCALE[(match.group(2) or "B").lower()]
+    return to_num(match.group(1)) * scale
+
+
+def parse_amd_fdinfo(text: str | None) -> dict[str, Any] | None:
+    """One `/proc/<pid>/fdinfo/<fd>` blob for an amdgpu client.
+
+    Prefers `drm-resident-vram` (pages actually in VRAM). Older kernels only
+    expose `drm-memory-vram`. Returns None when the fd is not amdgpu.
+    """
+    if not text or "drm-driver:" not in text:
+        return None
+    fields: dict[str, str] = {}
+    for line in text.split("\n"):
+        idx = line.find(":")
+        if idx < 0:
+            continue
+        fields[line[:idx].strip()] = line[idx + 1 :].strip()
+    if fields.get("drm-driver") != "amdgpu":
+        return None
+    raw = fields.get("drm-resident-vram")
+    if raw is None:
+        raw = fields.get("drm-memory-vram")
+    return {
+        "pdev": fields.get("drm-pdev", ""),
+        "client": fields.get("drm-client-id", ""),
+        "vramBytes": parse_drm_size_bytes(raw),
+    }
+
+
+def sum_amd_vram_by_pid(samples: list[dict[str, Any]]) -> dict[int, float]:
+    """Sum unique amdgpu clients per pid.
+
+    One process often holds several fds for the same `drm-client-id`; those
+    must not be added twice. Distinct clients on the same pid are added.
+    Shared buffers can still appear in more than one pid — that sum is not
+    the GPU total from `mem_info_vram_used`.
+    """
+    best: dict[tuple[int, str, str], float] = {}
+    for sample in samples:
+        pid = int(to_num(sample.get("pid")))
+        if pid <= 0:
+            continue
+        key = (pid, str(sample.get("pdev") or ""), str(sample.get("client") or ""))
+        amount = to_num(sample.get("vramBytes"))
+        best[key] = max(best.get(key, 0.0), amount)
+    totals: dict[int, float] = {}
+    for (pid, _pdev, _client), amount in best.items():
+        if amount <= 0:
+            continue
+        totals[pid] = totals.get(pid, 0.0) + amount
+    return totals
+
+
+def parse_pci_vendor_devices(text: str | None, vendor_id: str) -> dict[str, str]:
+    """Device id → name for one vendor block in pci.ids. Subsystem lines are ignored."""
+    want = vendor_id.lower().removeprefix("0x")
+    out: dict[str, str] = {}
+    if not text or not want:
+        return out
+    in_vendor = False
+    for line in text.split("\n"):
+        if not line or line.startswith("#"):
+            continue
+        if not line.startswith("\t"):
+            token = line.split()
+            in_vendor = bool(token) and token[0].lower() == want
+            continue
+        if not in_vendor or line.startswith("\t\t"):
+            continue
+        parts = line.strip().split(None, 1)
+        if len(parts) == 2:
+            out[parts[0].lower()] = parts[1].strip()
+    return out
 
 
 def parse_nvidia_gpu(text: str | None) -> list[float]:

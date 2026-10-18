@@ -165,7 +165,7 @@ class ZramCard(Card):
 
 class VramCard(Card):
     def __init__(self, snapshot: Snapshot, parent: QWidget | None = None) -> None:
-        super().__init__("NVIDIA VRAM", "◉", THEME.accent_green, parent, min_height=200)
+        super().__init__("GPU VRAM", "◉", THEME.accent_green, parent, min_height=200)
         self._snap = snapshot
         self._header = Text("n/a", THEME.text, THEME.font_size_md, bold=True, parent=self)
         self._pct = Text("", THEME.text_faint, THEME.font_size_sm, parent=self)
@@ -176,7 +176,7 @@ class VramCard(Card):
         inner_layout = QVBoxLayout(inner)
         inner_layout.setContentsMargins(0, 0, 4, 0)
         inner_layout.setSpacing(6)
-        self._note = Text("querying nvidia-smi…", THEME.text_faint, THEME.font_size_sm, parent=inner)
+        self._note = Text("querying GPU…", THEME.text_faint, THEME.font_size_sm, parent=inner)
         self._note.setWordWrap(True)
         inner_layout.addWidget(self._note)
         self._gpus = QVBoxLayout()
@@ -197,6 +197,7 @@ class VramCard(Card):
 
     def refresh(self) -> None:
         vram = self._snap.vram
+        self.set_title(vram.card_title)
         if vram.available:
             self._header.setText(f"{fmt.fmt_kb(vram.gpu_used_mib * 1024)} / {fmt.fmt_kb(vram.gpu_total_mib * 1024)}")
             self._pct.setText(f"  ({fmt.fmt_pct(vram.used_pct)})")
@@ -204,7 +205,7 @@ class VramCard(Card):
         else:
             self._header.setText("n/a")
             self._pct.setText("")
-            self._note.setText("nvidia-smi unavailable — VRAM card disabled" if vram.nvidia_failed else "querying nvidia-smi…")
+            self._note.setText(vram.status_note)
             self._note.show()
         while len(self._gpu_widgets) < len(vram.gpus):
             widget = _GpuRow(self)

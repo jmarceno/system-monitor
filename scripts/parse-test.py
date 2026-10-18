@@ -160,6 +160,46 @@ def main() -> int:
     )
     check("nvidia app args stripped", apps[2]["name"] == "llama-cli", apps[2]["name"])
 
+    check(
+        "amd short name uses pci.ids marketing string",
+        parse.short_gpu_name("Baffin [Radeon RX 550 640SP / RX 560/560X]")
+        == "Radeon RX 550 640SP / RX 560/560X",
+    )
+    check("drm size KiB", parse.parse_drm_size_bytes("65976 KiB") == 65976 * 1024)
+    check("drm size MiB", parse.parse_drm_size_bytes("5 MiB") == 5 * 1024 * 1024)
+    check("drm size bare bytes", parse.parse_drm_size_bytes("1000") == 1000)
+    fdinfo = (
+        "drm-driver:\tamdgpu\n"
+        "drm-client-id:\t19\n"
+        "drm-pdev:\t0000:07:00.0\n"
+        "drm-resident-vram:\t65976 KiB\n"
+        "drm-memory-vram:\t1000 KiB\n"
+    )
+    amd = parse.parse_amd_fdinfo(fdinfo)
+    check(
+        "amd fdinfo prefers resident vram",
+        bool(amd and amd["client"] == "19" and amd["vramBytes"] == 65976 * 1024),
+        amd,
+    )
+    legacy = parse.parse_amd_fdinfo("drm-driver:\tamdgpu\ndrm-memory-vram:\t4096\n")
+    check("amd fdinfo legacy memory bytes", bool(legacy and legacy["vramBytes"] == 4096), legacy)
+    check("fdinfo ignores non-amdgpu", parse.parse_amd_fdinfo("drm-driver:\ti915\ndrm-resident-vram:\t10 KiB\n") is None)
+    merged = parse.sum_amd_vram_by_pid([
+        {"pid": 10, "pdev": "0000:07:00.0", "client": "1", "vramBytes": 1000},
+        {"pid": 10, "pdev": "0000:07:00.0", "client": "1", "vramBytes": 5000},
+        {"pid": 10, "pdev": "0000:07:00.0", "client": "2", "vramBytes": 2000},
+        {"pid": 11, "pdev": "0000:07:00.0", "client": "3", "vramBytes": 0},
+    ])
+    check("amd clients deduped per pid", merged.get(10) == 7000 and 11 not in merged, merged)
+    pci = parse.parse_pci_vendor_devices(
+        "1002  Advanced Micro Devices, Inc. [AMD/ATI]\n"
+        "\t67ff  Baffin [Radeon RX 550 640SP / RX 560/560X]\n"
+        "\t\t1002 0b04  Subsystem\n"
+        "10de  NVIDIA Corporation\n",
+        "1002",
+    )
+    check("pci.ids amd device", pci.get("67ff", "").startswith("Baffin"), pci)
+
     collect_py = ROOT / "sysmon" / "lib" / "ai_spend_collect.py"
     ai_spend = subprocess.check_output(["python3", str(collect_py), "--self-test"], text=True)
     check("ai-spend self-test", "All ai-spend parser checks passed." in ai_spend, ai_spend)

@@ -13,7 +13,7 @@ grid, so it tiles and resizes like any other program.
 - RAM used, available memory, cache and memory pressure
 - zram compression, RAM held and savings
 - Real disk swap usage and write rate, separated from zram activity
-- Combined NVIDIA VRAM (one ring gauge) with a per-GPU bar, per-GPU die temp, and the heaviest VRAM consumer
+- Combined GPU VRAM (one ring gauge) with a per-GPU bar, per-GPU temperature, and the heaviest VRAM consumer (NVIDIA via `nvidia-smi`, AMD via amdgpu sysfs and fdinfo)
 - CPU, RAM, swap and VRAM summaries at a glance
 - Mounted internal and removable storage, with free space and a per-device I/O
   sparkline, in the same window as the memory sections
@@ -45,7 +45,9 @@ systemctl --user stop system-monitor
 
 Requires Python 3.11+, PySide6, Wayland (Hyprland or KDE Plasma) and Linux.
 zram is optional; the app degrades gracefully when it is unavailable.
-NVIDIA VRAM details use `nvidia-smi` when available.
+NVIDIA VRAM uses `nvidia-smi` when that binary is on `PATH`. AMD VRAM uses
+amdgpu sysfs (`mem_info_vram_*`, edge temperature) and per-process fdinfo.
+Both are shown when a machine has both.
 
 On Hyprland the window tiles with the rest of the desktop. If an older copy of
 `packaging/hyprland-windowrule.conf` is still sourced, remove those

@@ -11,7 +11,7 @@ Target environment (verified on this machine):
 | Desktop | Hyprland Wayland (was KDE Plasma Wayland/KWin); Omarchy 4.0.4 |
 | Runtime | Python 3.12+ / PySide6 6.x (was Quickshell 0.3.1) |
 | Kernel | 7.2.5-3-omarchy (was 6.12.104-1-MANJARO) |
-| GPU | two NVIDIA RTX 3060 (`nvidia-smi` lists one row per GPU; gauge sums them) |
+| GPU | AMD Radeon RX 550/560 (Baffin, `amdgpu`); NVIDIA still supported when `nvidia-smi` is present |
 | zram | `/dev/zram0`, priority 100, world-readable `mm_stat`/`stat`/`io_stat` |
 | Disk swap | `/swap/swapfile` (32 GB, priority 0; was `/home/swapfile` prio 10) |
 | zswap | disabled (`/proc/meminfo` → `Zswapped: 0 kB`) |
@@ -162,20 +162,31 @@ UI verdict states (this is what the user actually needs):
 
 ### 4.4 VRAM consumers (`collectors/vram.py`)
 
-Primary (NVIDIA, this machine): `Process.exec` of two read-only queries every **5 s**:
+The ring gauge and card header use the **sum** of used / total across every
+GPU. The VRAM card draws **one bar per GPU** and the ring stacks one
+temperature per GPU, in the same order. Temperatures are never merged into a
+single hottest reading. NVIDIA and AMD cards are both listed when both are
+present. The card title is `NVIDIA VRAM`, `AMD VRAM`, or `GPU VRAM` when the
+two vendors are mixed.
+
+NVIDIA, when `nvidia-smi` is on `PATH` — two read-only queries every **5 s**
+(process list every **10 s**), via `QProcess`:
 
 - `nvidia-smi --query-gpu=memory.used,memory.total,temperature.gpu,index,name --format=csv,noheader,nounits`
-  → one CSV line per GPU. The ring gauge and card header use the **sum** of
-  `memory.used` / `memory.total` across all lines; the VRAM card draws **one bar
-  per GPU**. The ring stacks one die temp per GPU (same order as the bars);
-  they are never merged into a single hottest reading.
+  → one CSV line per GPU.
 - `nvidia-smi --query-compute-apps=pid,used_memory,process_name --format=csv,noheader,nounits`
-  → for each pid: read `/proc/<pid>/comm` to get the short friendly name; **validate pid is alive and comm matches the reported basename** (guards against PID reuse races; drop stale entries instead of mislabeling).
+  → for each pid: read `/proc/<pid>/comm` and **require comm to match the reported basename** (guards against PID reuse; drop stale entries instead of mislabeling).
 
-Fallback paths (keep for AMD/other machines / future portability):
+AMD `amdgpu` — read from sysfs, including on machines with no NVIDIA GPU:
 
-- Generic: scan `/proc/*/fdinfo/*` for `drm-` fields (`vram`, `gtt`, `dma-buf`) — works with amdgpu fdinfo.
-- Graceful degrade when `nvidia-smi` missing: hide card, log once.
+- `/sys/class/drm/cardN/device/mem_info_vram_used` and `mem_info_vram_total` (bytes). Only `cardN` nodes whose vendor is `0x1002` and whose driver is `amdgpu`. Connector nodes (`card0-DP-1`) are ignored.
+- Edge temperature from that device's hwmon (`name` = `amdgpu`, label `edge`, millidegrees). Junction/hotspot is not substituted for edge.
+- Marketing name from the pci.ids device id (`/usr/share/hwdata/pci.ids`, else `AMD GPU`).
+- Per-process resident VRAM: fds under `/proc/<pid>/fd` that point at `/dev/dri/*`, then `drm-resident-vram` in the matching fdinfo (fallback `drm-memory-vram` on older kernels). Duplicate fds for one `drm-client-id` count once. This walk runs on a `QThread` so it does not block the UI. `/proc/<pid>/comm` is the label; a pid that exits before the read is dropped.
+
+Per-process sums are not the GPU total (shared buffers plus driver-reserved memory). Show the sysfs or `nvidia-smi` total separately.
+
+If neither source yields a total, the card shows n/a and logs once.
 
 ### 4.5 Mounted storage (`collectors/storage.py`)
 
@@ -340,6 +351,7 @@ The mockup added three things that were "out of scope" in §2. They are implemen
 ### 9.3 Python / Qt notes
 
 - `nvidia-smi` and `lsblk` run through `QProcess` so the UI thread never waits on them.
+- AMD VRAM totals are small `/sys` reads. The amdgpu fdinfo process walk runs on a `QThread`.
 - AI spend runs `collect()` on a `QThread`; credentials never enter the UI layer.
 - Window state is a JSON file under `$XDG_STATE_HOME/system-monitor/` (debounced 400 ms).
 - Headless verification: `.venv/bin/python -m sysmon --check`.
